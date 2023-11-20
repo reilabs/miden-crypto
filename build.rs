@@ -36,7 +36,7 @@ fn compile_rpo_falcon() {
 
 #[cfg(all(target_feature = "sve", feature = "sve"))]
 fn compile_arch_arm64_sve() {
-    const RPO_SVE_PATH: &str = "arch/arm64-sve/rpo";
+    const RPO_SVE_PATH: &str = "src/arch/arm64-sve/rpo";
 
     println!("cargo:rerun-if-changed={RPO_SVE_PATH}/library.c");
     println!("cargo:rerun-if-changed={RPO_SVE_PATH}/library.h");

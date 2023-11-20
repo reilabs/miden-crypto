@@ -7,8 +7,12 @@ pub use digest::RpoDigest;
 mod mds_freq;
 use mds_freq::mds_multiply_freq;
 
+// #[cfg(all(target_feature = "avx2", target_feature = "bmi2"))]
+use crate::arch::avx512::{plonky2_apply_sbox, plonky2_apply_inv_sbox};
+
 #[cfg(test)]
 mod tests;
+
 
 #[cfg(all(target_feature = "sve", feature = "sve"))]
 #[link(name = "rpo_sve", kind = "static")]
@@ -374,47 +378,75 @@ impl Rpo256 {
     // HELPER FUNCTIONS
     // --------------------------------------------------------------------------------------------
 
+    // #[inline(always)]
+    // #[cfg(all(target_feature = "sve", feature = "sve"))]
+    // fn optimized_add_constants_and_apply_sbox(
+    //     state: &mut [Felt; STATE_WIDTH],
+    //     ark: &[Felt; STATE_WIDTH],
+    // ) -> bool {
+    //     unsafe {
+    //         add_constants_and_apply_sbox(state.as_mut_ptr() as *mut u64, ark.as_ptr() as *const u64)
+    //     }
+    // }
+
+    // #[inline(always)]
+    // #[cfg(not(all(target_feature = "sve", feature = "sve")))]
+    // fn optimized_add_constants_and_apply_sbox(
+    //     _state: &mut [Felt; STATE_WIDTH],
+    //     _ark: &[Felt; STATE_WIDTH],
+    // ) -> bool {
+    //     false
+    // }
+
     #[inline(always)]
-    #[cfg(all(target_feature = "sve", feature = "sve"))]
+    // #[cfg(all(target_feature = "avx2", target_feature = "bmi2"))]
     fn optimized_add_constants_and_apply_sbox(
         state: &mut [Felt; STATE_WIDTH],
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
+        Self::add_constants(state, ark);
         unsafe {
-            add_constants_and_apply_sbox(state.as_mut_ptr() as *mut u64, ark.as_ptr() as *const u64)
+            let buffer = std::mem::transmute(state);
+            plonky2_apply_sbox(buffer);
         }
+        true
     }
 
-    #[inline(always)]
-    #[cfg(not(all(target_feature = "sve", feature = "sve")))]
-    fn optimized_add_constants_and_apply_sbox(
-        _state: &mut [Felt; STATE_WIDTH],
-        _ark: &[Felt; STATE_WIDTH],
-    ) -> bool {
-        false
-    }
+    // #[inline(always)]
+    // #[cfg(all(target_feature = "sve", feature = "sve"))]
+    // fn optimized_add_constants_and_apply_inv_sbox(
+    //     state: &mut [Felt; STATE_WIDTH],
+    //     ark: &[Felt; STATE_WIDTH],
+    // ) -> bool {
+    //     unsafe {
+    //         add_constants_and_apply_inv_sbox(
+    //             state.as_mut_ptr() as *mut u64,
+    //             ark.as_ptr() as *const u64,
+    //         )
+    //     }
+    // }
+    //
+    // #[inline(always)]
+    // #[cfg(not(all(target_feature = "sve", feature = "sve")))]
+    // fn optimized_add_constants_and_apply_inv_sbox(
+    //     _state: &mut [Felt; STATE_WIDTH],
+    //     _ark: &[Felt; STATE_WIDTH],
+    // ) -> bool {
+    //     false
+    // }
 
     #[inline(always)]
-    #[cfg(all(target_feature = "sve", feature = "sve"))]
+    // #[cfg(all(target_feature = "avx2", target_feature = "bmi2"))]
     fn optimized_add_constants_and_apply_inv_sbox(
         state: &mut [Felt; STATE_WIDTH],
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
+        Self::add_constants(state, ark);
         unsafe {
-            add_constants_and_apply_inv_sbox(
-                state.as_mut_ptr() as *mut u64,
-                ark.as_ptr() as *const u64,
-            )
+            let buffer = std::mem::transmute(state);
+            plonky2_apply_inv_sbox(buffer);
         }
-    }
-
-    #[inline(always)]
-    #[cfg(not(all(target_feature = "sve", feature = "sve")))]
-    fn optimized_add_constants_and_apply_inv_sbox(
-        _state: &mut [Felt; STATE_WIDTH],
-        _ark: &[Felt; STATE_WIDTH],
-    ) -> bool {
-        false
+        true
     }
 
     #[inline(always)]
