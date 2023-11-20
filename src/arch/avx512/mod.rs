@@ -229,7 +229,7 @@ unsafe fn mul_reduce(a: (__m256i, __m256i, __m256i), b: (__m256i, __m256i, __m25
 
 #[inline(always)]
 unsafe fn square_reduce(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
-    reduce3(square(state))
+    reduce3(square3(state))
 }
 
 #[inline(always)]
@@ -245,7 +245,6 @@ unsafe fn exp_acc(high: (__m256i, __m256i, __m256i), low: (__m256i, __m256i, __m
 #[inline(always)]
 unsafe fn plonky2_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
     let state2 = square_reduce(state);
-    let state2 = reduce3(state2_unreduced);
     let state4_unreduced = square3(state2);
     let state3_unreduced = mul3(state2, state);
     let state4 = reduce3(state4_unreduced);
@@ -283,7 +282,7 @@ unsafe fn plonky2_inv_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m2
     // compute base^1001001001001001001001001001000110110110110110110110110110110111
     let a = square_reduce(square_reduce(mul_reduce( square_reduce(t7), t6)));
     let b = mul_reduce(t1, mul_reduce(t2, state));
-    *state = mul_reduce(a, b);
+    mul_reduce(a, b)
 }
 
 #[inline(always)]
