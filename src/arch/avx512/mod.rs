@@ -254,6 +254,7 @@ unsafe fn plonky2_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i,
     state7
 }
 
+#[inline(always)]
 unsafe fn plonky2_inv_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
     // compute base^10540996611094048183 using 72 multiplications per array element
     // 10540996611094048183 = b1001001001001001001001001001000110110110110110110110110110110111
@@ -301,6 +302,7 @@ unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, __m256i)) {
     _mm256_storeu_si256((&mut buf[8..12]).as_mut_ptr().cast::<__m256i>(), state.2);
 }
 
+#[inline(always)]
 pub unsafe fn plonky2_apply_sbox(
     buffer: &mut [u64; 12]
 ) {
@@ -309,6 +311,7 @@ pub unsafe fn plonky2_apply_sbox(
     avx2_store(buffer, state);
 }
 
+#[inline(always)]
 pub unsafe fn plonky2_apply_inv_sbox(
     buffer: &mut [u64; 12]
 ) {
