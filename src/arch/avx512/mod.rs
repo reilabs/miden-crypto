@@ -10,7 +10,7 @@ use core::arch::x86_64::*;
 //    return -1 (all bits 1) for true and 0 for false.
 //
 // 2. AVX does not have unsigned 64-bit comparisons. Those can be emulated with signed comparisons
-//    by recognizing that a <u b iff a + (1 << 63) <s b + (1 << 63), where the addition wraps around
+//    by recognizing that a <u b iff a  <s b + (1 << 63), where the addition wraps around
 //    and the comparisons are unsigned and signed respectively. The shift function adds/subtracts
 //    1 << 63 to enable this trick.
 //      Example: addition with carry.
@@ -247,9 +247,10 @@ unsafe fn exp_acc(high: (__m256i, __m256i, __m256i), low: (__m256i, __m256i, __m
 
 #[inline(always)]
 unsafe fn add_constants(state: (__m256i, __m256i, __m256i), const_s: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
-    let res = map2!(_mm256_sub_epi64, state, const_s); // TODO: assume const_s is (p - const)_shifted
-    let mask = map2!(_mm256_cmpgt_epi32, res, state); // TODO: this doesn't work without the top bit xor?
+    let res = map2!(_mm256_sub_epi64, state, const_s);
+    let mask = map2!(_mm256_cmpgt_epi32, res, state);
     let res = map2!(maybe_adj_sub, res, mask);
+    // TODO: this doesn't work without the top bit xor?
     (res.0, res.1, state.2)
 }
 
@@ -316,23 +317,23 @@ unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, __m256i)) {
 #[inline(always)]
 pub unsafe fn plonky2_apply_sbox(
     buffer: &mut [u64; 12],
-    constants: &[u64; 12],
+    const_s: &[u64; 12],
 ) {
-    let mut state = avx2_load(&buffer);
-    let constants = avx2_load(&constants);
-    state = add_constants(state, constants);
-    state = plonky2_sbox(state);
+    let state = avx2_load(&buffer);
+    let const_s = avx2_load(&const_s);
+    let state_s = add_constants(state, const_s);
+    let state = plonky2_sbox(state_s);
     avx2_store(buffer, state);
 }
 
 #[inline(always)]
 pub unsafe fn plonky2_apply_inv_sbox(
     buffer: &mut [u64; 12],
-    constants: &[u64; 12],
+    const_s: &[u64; 12],
 ) {
-    let mut state = avx2_load(&buffer);
-    let constants = avx2_load(&constants);
-    state = add_constants(state, constants);
-    state = plonky2_inv_sbox(state);
+    let state = avx2_load(&buffer);
+    let const_s = avx2_load(&const_s);
+    let state_s = add_constants(state, const_s);
+    let state = plonky2_inv_sbox(state_s);
     avx2_store(buffer, state);
 }

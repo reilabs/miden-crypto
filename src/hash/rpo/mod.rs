@@ -362,14 +362,14 @@ impl Rpo256 {
     pub fn apply_round(state: &mut [Felt; STATE_WIDTH], round: usize) {
         // apply first half of RPO round
         Self::apply_mds(state);
-        if !Self::optimized_add_constants_and_apply_sbox(state, &ARK1[round]) {
+        if !Self::optimized_add_constants_and_apply_sbox(state, &ARK1_SHIFT[round]) {
             Self::add_constants(state, &ARK1[round]);
             Self::apply_sbox(state);
         }
 
         // apply second half of RPO round
         Self::apply_mds(state);
-        if !Self::optimized_add_constants_and_apply_inv_sbox(state, &ARK2[round]) {
+        if !Self::optimized_add_constants_and_apply_inv_sbox(state, &ARK2_SHIFT[round]) {
             Self::add_constants(state, &ARK2[round]);
             Self::apply_inv_sbox(state);
         }
@@ -729,11 +729,6 @@ const MDS: [[Felt; STATE_WIDTH]; STATE_WIDTH] = [
 // ROUND CONSTANTS
 // ================================================================================================
 
-/// Rescue round constants;
-/// computed as in [specifications](https://github.com/ASDiscreteMathematics/rpo)
-///
-/// The constants are broken up into two arrays ARK1 and ARK2; ARK1 contains the constants for the
-/// first half of RPO round, and ARK2 contains constants for the second half of RPO round.
 const ARK1: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
     [
         Felt::new(5789762306288267392),
@@ -933,5 +928,212 @@ const ARK2: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
         Felt::new(9643968136937729763),
         Felt::new(3611348709641382851),
         Felt::new(18256379591337759196),
+    ],
+];
+
+/// Rescue round constants;
+/// computed as in [specifications](https://github.com/ASDiscreteMathematics/rpo)
+///
+/// The constants are broken up into two arrays ARK1 and ARK2; ARK1 contains the constants for the
+/// first half of RPO round, and ARK2 contains constants for the second half of RPO round.
+const Ms: u64 = 0x7FFFFFFF00000001;
+const ARK1_SHIFT: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
+    [
+        Felt::new(Ms - 5789762306288267392),
+        Felt::new(Ms - 6522564764413701783),
+        Felt::new(Ms - 17809893479458208203),
+        Felt::new(Ms - 107145243989736508),
+        Felt::new(Ms - 6388978042437517382),
+        Felt::new(Ms - 15844067734406016715),
+        Felt::new(Ms - 9975000513555218239),
+        Felt::new(Ms - 3344984123768313364),
+        Felt::new(Ms - 9959189626657347191),
+        Felt::new(Ms - 12960773468763563665),
+        Felt::new(Ms - 9602914297752488475),
+        Felt::new(Ms - 16657542370200465908),
+    ],
+    [
+        Felt::new(Ms - 12987190162843096997),
+        Felt::new(Ms - 653957632802705281),
+        Felt::new(Ms - 4441654670647621225),
+        Felt::new(Ms - 4038207883745915761),
+        Felt::new(Ms - 5613464648874830118),
+        Felt::new(Ms - 13222989726778338773),
+        Felt::new(Ms - 3037761201230264149),
+        Felt::new(Ms - 16683759727265180203),
+        Felt::new(Ms - 8337364536491240715),
+        Felt::new(Ms - 3227397518293416448),
+        Felt::new(Ms - 8110510111539674682),
+        Felt::new(Ms - 2872078294163232137),
+    ],
+    [
+        Felt::new(Ms - 18072785500942327487),
+        Felt::new(Ms - 6200974112677013481),
+        Felt::new(Ms - 17682092219085884187),
+        Felt::new(Ms - 10599526828986756440),
+        Felt::new(Ms - 975003873302957338),
+        Felt::new(Ms - 8264241093196931281),
+        Felt::new(Ms - 10065763900435475170),
+        Felt::new(Ms - 2181131744534710197),
+        Felt::new(Ms - 6317303992309418647),
+        Felt::new(Ms - 1401440938888741532),
+        Felt::new(Ms - 8884468225181997494),
+        Felt::new(Ms - 13066900325715521532),
+    ],
+    [
+        Felt::new(Ms - 5674685213610121970),
+        Felt::new(Ms - 5759084860419474071),
+        Felt::new(Ms - 13943282657648897737),
+        Felt::new(Ms - 1352748651966375394),
+        Felt::new(Ms - 17110913224029905221),
+        Felt::new(Ms - 1003883795902368422),
+        Felt::new(Ms - 4141870621881018291),
+        Felt::new(Ms - 8121410972417424656),
+        Felt::new(Ms - 14300518605864919529),
+        Felt::new(Ms - 13712227150607670181),
+        Felt::new(Ms - 17021852944633065291),
+        Felt::new(Ms - 6252096473787587650),
+    ],
+    [
+        Felt::new(Ms - 4887609836208846458),
+        Felt::new(Ms - 3027115137917284492),
+        Felt::new(Ms - 9595098600469470675),
+        Felt::new(Ms - 10528569829048484079),
+        Felt::new(Ms - 7864689113198939815),
+        Felt::new(Ms - 17533723827845969040),
+        Felt::new(Ms - 5781638039037710951),
+        Felt::new(Ms - 17024078752430719006),
+        Felt::new(Ms - 109659393484013511),
+        Felt::new(Ms - 7158933660534805869),
+        Felt::new(Ms - 2955076958026921730),
+        Felt::new(Ms - 7433723648458773977),
+    ],
+    [
+        Felt::new(Ms - 16308865189192447297),
+        Felt::new(Ms - 11977192855656444890),
+        Felt::new(Ms - 12532242556065780287),
+        Felt::new(Ms - 14594890931430968898),
+        Felt::new(Ms - 7291784239689209784),
+        Felt::new(Ms - 5514718540551361949),
+        Felt::new(Ms - 10025733853830934803),
+        Felt::new(Ms - 7293794580341021693),
+        Felt::new(Ms - 6728552937464861756),
+        Felt::new(Ms - 6332385040983343262),
+        Felt::new(Ms - 13277683694236792804),
+        Felt::new(Ms - 2600778905124452676),
+    ],
+    [
+        Felt::new(Ms - 7123075680859040534),
+        Felt::new(Ms - 1034205548717903090),
+        Felt::new(Ms - 7717824418247931797),
+        Felt::new(Ms - 3019070937878604058),
+        Felt::new(Ms - 11403792746066867460),
+        Felt::new(Ms - 10280580802233112374),
+        Felt::new(Ms - 337153209462421218),
+        Felt::new(Ms - 13333398568519923717),
+        Felt::new(Ms - 3596153696935337464),
+        Felt::new(Ms - 8104208463525993784),
+        Felt::new(Ms - 14345062289456085693),
+        Felt::new(Ms - 17036731477169661256),
+    ],
+];
+const ARK2_SHIFT: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
+    [
+        Felt::new(Ms - 6077062762357204287),
+        Felt::new(Ms - 15277620170502011191),
+        Felt::new(Ms - 5358738125714196705),
+        Felt::new(Ms - 14233283787297595718),
+        Felt::new(Ms - 13792579614346651365),
+        Felt::new(Ms - 11614812331536767105),
+        Felt::new(Ms - 14871063686742261166),
+        Felt::new(Ms - 10148237148793043499),
+        Felt::new(Ms - 4457428952329675767),
+        Felt::new(Ms - 15590786458219172475),
+        Felt::new(Ms - 10063319113072092615),
+        Felt::new(Ms - 14200078843431360086),
+    ],
+    [
+        Felt::new(Ms - 6202948458916099932),
+        Felt::new(Ms - 17690140365333231091),
+        Felt::new(Ms - 3595001575307484651),
+        Felt::new(Ms - 373995945117666487),
+        Felt::new(Ms - 1235734395091296013),
+        Felt::new(Ms - 14172757457833931602),
+        Felt::new(Ms - 707573103686350224),
+        Felt::new(Ms - 15453217512188187135),
+        Felt::new(Ms - 219777875004506018),
+        Felt::new(Ms - 17876696346199469008),
+        Felt::new(Ms - 17731621626449383378),
+        Felt::new(Ms - 2897136237748376248),
+    ],
+    [
+        Felt::new(Ms - 8023374565629191455),
+        Felt::new(Ms - 15013690343205953430),
+        Felt::new(Ms - 4485500052507912973),
+        Felt::new(Ms - 12489737547229155153),
+        Felt::new(Ms - 9500452585969030576),
+        Felt::new(Ms - 2054001340201038870),
+        Felt::new(Ms - 12420704059284934186),
+        Felt::new(Ms - 355990932618543755),
+        Felt::new(Ms - 9071225051243523860),
+        Felt::new(Ms - 12766199826003448536),
+        Felt::new(Ms - 9045979173463556963),
+        Felt::new(Ms - 12934431667190679898),
+    ],
+    [
+        Felt::new(Ms - 18389244934624494276),
+        Felt::new(Ms - 16731736864863925227),
+        Felt::new(Ms - 4440209734760478192),
+        Felt::new(Ms - 17208448209698888938),
+        Felt::new(Ms - 8739495587021565984),
+        Felt::new(Ms - 17000774922218161967),
+        Felt::new(Ms - 13533282547195532087),
+        Felt::new(Ms - 525402848358706231),
+        Felt::new(Ms - 16987541523062161972),
+        Felt::new(Ms - 5466806524462797102),
+        Felt::new(Ms - 14512769585918244983),
+        Felt::new(Ms - 10973956031244051118),
+    ],
+    [
+        Felt::new(Ms - 6982293561042362913),
+        Felt::new(Ms - 14065426295947720331),
+        Felt::new(Ms - 16451845770444974180),
+        Felt::new(Ms - 7139138592091306727),
+        Felt::new(Ms - 9012006439959783127),
+        Felt::new(Ms - 14619614108529063361),
+        Felt::new(Ms - 1394813199588124371),
+        Felt::new(Ms - 4635111139507788575),
+        Felt::new(Ms - 16217473952264203365),
+        Felt::new(Ms - 10782018226466330683),
+        Felt::new(Ms - 6844229992533662050),
+        Felt::new(Ms - 7446486531695178711),
+    ],
+    [
+        Felt::new(Ms - 3736792340494631448),
+        Felt::new(Ms - 577852220195055341),
+        Felt::new(Ms - 6689998335515779805),
+        Felt::new(Ms - 13886063479078013492),
+        Felt::new(Ms - 14358505101923202168),
+        Felt::new(Ms - 7744142531772274164),
+        Felt::new(Ms - 16135070735728404443),
+        Felt::new(Ms - 12290902521256031137),
+        Felt::new(Ms - 12059913662657709804),
+        Felt::new(Ms - 16456018495793751911),
+        Felt::new(Ms - 4571485474751953524),
+        Felt::new(Ms - 17200392109565783176),
+    ],
+    [
+        Felt::new(Ms - 17130398059294018733),
+        Felt::new(Ms - 519782857322261988),
+        Felt::new(Ms - 9625384390925085478),
+        Felt::new(Ms - 1664893052631119222),
+        Felt::new(Ms - 7629576092524553570),
+        Felt::new(Ms - 3485239601103661425),
+        Felt::new(Ms - 9755891797164033838),
+        Felt::new(Ms - 15218148195153269027),
+        Felt::new(Ms - 16460604813734957368),
+        Felt::new(Ms - 9643968136937729763),
+        Felt::new(Ms - 3611348709641382851),
+        Felt::new(Ms - 18256379591337759196),
     ],
 ];
