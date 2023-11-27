@@ -274,10 +274,10 @@ unsafe fn reduce3(
     let t1 = map2!(_mm256_mul_epu32, hi0, rep epsilon);
     let lo2_s = add_small(lo1_s, t1);
 
-    let res0 = r0.wrapping_sub(0u32.wrapping_sub(c0 as u32) as u64)
-    let res1 = r1.wrapping_sub(0u32.wrapping_sub(c1 as u32) as u64)
-    let res2 = r2.wrapping_sub(0u32.wrapping_sub(c2 as u32) as u64)
-    let res3 = r3.wrapping_sub(0u32.wrapping_sub(c3 as u32) as u64)
+    let res0 = r0.wrapping_sub(0u32.wrapping_sub(c0 as u32) as u64);
+    let res1 = r1.wrapping_sub(0u32.wrapping_sub(c1 as u32) as u64);
+    let res2 = r2.wrapping_sub(0u32.wrapping_sub(c2 as u32) as u64);
+    let res3 = r3.wrapping_sub(0u32.wrapping_sub(c3 as u32) as u64);
 
     let lo2 = map2!(_mm256_xor_si256, lo2_s, rep sign_bit);
     (lo2.0, lo2.1, [res0, res1, res2, res3])
