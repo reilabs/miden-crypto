@@ -56,29 +56,28 @@ pub fn branch_hint() {
     }
 }
 
-macro_rules! map3 {
+macro_rules! map2 {
     ($f:ident::<$l:literal>, $v:ident) => {
-        ($f::<$l>($v.0), $f::<$l>($v.1), $f::<$l>($v.2))
+        ($f::<$l>($v.0), $f::<$l>($v.1))
     };
     ($f:ident::<$l:literal>, $v1:ident, $v2:ident) => {
         (
             $f::<$l>($v1.0, $v2.0),
             $f::<$l>($v1.1, $v2.1),
-            $f::<$l>($v1.2, $v2.2),
         )
     };
     ($f:ident, $v:ident) => {
-        ($f($v.0), $f($v.1), $f($v.2))
+        ($f($v.0), $f($v.1)))
     };
     ($f:ident, $v0:ident, $v1:ident) => {
-        ($f($v0.0, $v1.0), $f($v0.1, $v1.1), $f($v0.2, $v1.2))
+        ($f($v0.0, $v1.0), $f($v0.1, $v1.1))
     };
     ($f:ident, rep $v0:ident, $v1:ident) => {
-        ($f($v0, $v1.0), $f($v0, $v1.1), $f($v0, $v1.2))
+        ($f($v0, $v1.0), $f($v0, $v1.1))
     };
 
     ($f:ident, $v0:ident, rep $v1:ident) => {
-        ($f($v0.0, $v1), $f($v0.1, $v1), $f($v0.2, $v1))
+        ($f($v0.0, $v1), $f($v0.1, $v1))
     };
 }
 
@@ -90,28 +89,28 @@ unsafe fn square3(
         // Move high bits to low position. The high bits of x_hi are ignored. Swizzle is faster than
         // bitshift. This instruction only has a floating-point flavor, so we cast to/from float.
         // This is safe and free.
-        let x_ps = map3!(_mm256_castsi256_ps, x);
-        let x_hi_ps = map3!(_mm256_movehdup_ps, x_ps);
-        map3!(_mm256_castps_si256, x_hi_ps)
+        let x_ps = map2!(_mm256_castsi256_ps, x);
+        let x_hi_ps = map2!(_mm256_movehdup_ps, x_ps);
+        map2!(_mm256_castps_si256, x_hi_ps)
     };
 
     // All pairwise multiplications.
-    let mul_ll = map3!(_mm256_mul_epu32, x, x);
-    let mul_lh = map3!(_mm256_mul_epu32, x, x_hi);
-    let mul_hh = map3!(_mm256_mul_epu32, x_hi, x_hi);
+    let mul_ll = map2!(_mm256_mul_epu32, x, x);
+    let mul_lh = map2!(_mm256_mul_epu32, x, x_hi);
+    let mul_hh = map2!(_mm256_mul_epu32, x_hi, x_hi);
 
     // Bignum addition, but mul_lh is shifted by 33 bits (not 32).
-    let mul_ll_hi = map3!(_mm256_srli_epi64::<33>, mul_ll);
-    let t0 = map3!(_mm256_add_epi64, mul_lh, mul_ll_hi);
-    let t0_hi = map3!(_mm256_srli_epi64::<31>, t0);
-    let res_hi = map3!(_mm256_add_epi64, mul_hh, t0_hi);
+    let mul_ll_hi = map2!(_mm256_srli_epi64::<33>, mul_ll);
+    let t0 = map2!(_mm256_add_epi64, mul_lh, mul_ll_hi);
+    let t0_hi = map2!(_mm256_srli_epi64::<31>, t0);
+    let res_hi = map2!(_mm256_add_epi64, mul_hh, t0_hi);
 
     // Form low result by adding the mul_ll and the low 31 bits of mul_lh (shifted to the high
     // position).
-    let mul_lh_lo = map3!(_mm256_slli_epi64::<33>, mul_lh);
-    let res_lo = map3!(_mm256_add_epi64, mul_ll, mul_lh_lo);
+    let mul_lh_lo = map2!(_mm256_slli_epi64::<33>, mul_lh);
+    let res_lo = map2!(_mm256_add_epi64, mul_ll, mul_lh_lo);
 
-    (res_lo, res_hi)
+    ((res_lo.0, res_lo.1, x.2), (res_hi.0, res_hi.1, x.2))
 }
 
 #[inline(always)]
@@ -124,58 +123,58 @@ unsafe fn mul3(
         // Move high bits to low position. The high bits of x_hi are ignored. Swizzle is faster than
         // bitshift. This instruction only has a floating-point flavor, so we cast to/from float.
         // This is safe and free.
-        let x_ps = map3!(_mm256_castsi256_ps, x);
-        let x_hi_ps = map3!(_mm256_movehdup_ps, x_ps);
-        map3!(_mm256_castps_si256, x_hi_ps)
+        let x_ps = map2!(_mm256_castsi256_ps, x);
+        let x_hi_ps = map2!(_mm256_movehdup_ps, x_ps);
+        map2!(_mm256_castps_si256, x_hi_ps)
     };
     let y_hi = {
-        let y_ps = map3!(_mm256_castsi256_ps, y);
-        let y_hi_ps = map3!(_mm256_movehdup_ps, y_ps);
-        map3!(_mm256_castps_si256, y_hi_ps)
+        let y_ps = map2!(_mm256_castsi256_ps, y);
+        let y_hi_ps = map2!(_mm256_movehdup_ps, y_ps);
+        map2!(_mm256_castps_si256, y_hi_ps)
     };
 
     // All four pairwise multiplications
-    let mul_ll = map3!(_mm256_mul_epu32, x, y);
-    let mul_lh = map3!(_mm256_mul_epu32, x, y_hi);
-    let mul_hl = map3!(_mm256_mul_epu32, x_hi, y);
-    let mul_hh = map3!(_mm256_mul_epu32, x_hi, y_hi);
+    let mul_ll = map2!(_mm256_mul_epu32, x, y);
+    let mul_lh = map2!(_mm256_mul_epu32, x, y_hi);
+    let mul_hl = map2!(_mm256_mul_epu32, x_hi, y);
+    let mul_hh = map2!(_mm256_mul_epu32, x_hi, y_hi);
 
     // Bignum addition
     // Extract high 32 bits of mul_ll and add to mul_hl. This cannot overflow.
-    let mul_ll_hi = map3!(_mm256_srli_epi64::<32>, mul_ll);
-    let t0 = map3!(_mm256_add_epi64, mul_hl, mul_ll_hi);
+    let mul_ll_hi = map2!(_mm256_srli_epi64::<32>, mul_ll);
+    let t0 = map2!(_mm256_add_epi64, mul_hl, mul_ll_hi);
     // Extract low 32 bits of t0 and add to mul_lh. Again, this cannot overflow.
     // Also, extract high 32 bits of t0 and add to mul_hh.
-    let t0_lo = map3!(_mm256_and_si256, t0, rep epsilon);
-    let t0_hi = map3!(_mm256_srli_epi64::<32>, t0);
-    let t1 = map3!(_mm256_add_epi64, mul_lh, t0_lo);
-    let t2 = map3!(_mm256_add_epi64, mul_hh, t0_hi);
+    let t0_lo = map2!(_mm256_and_si256, t0, rep epsilon);
+    let t0_hi = map2!(_mm256_srli_epi64::<32>, t0);
+    let t1 = map2!(_mm256_add_epi64, mul_lh, t0_lo);
+    let t2 = map2!(_mm256_add_epi64, mul_hh, t0_hi);
     // Lastly, extract the high 32 bits of t1 and add to t2.
-    let t1_hi = map3!(_mm256_srli_epi64::<32>, t1);
-    let res_hi = map3!(_mm256_add_epi64, t2, t1_hi);
+    let t1_hi = map2!(_mm256_srli_epi64::<32>, t1);
+    let res_hi = map2!(_mm256_add_epi64, t2, t1_hi);
 
     // Form res_lo by combining the low half of mul_ll with the low half of t1 (shifted into high
     // position).
     let t1_lo = {
-        let t1_ps = map3!(_mm256_castsi256_ps, t1);
-        let t1_lo_ps = map3!(_mm256_moveldup_ps, t1_ps);
-        map3!(_mm256_castps_si256, t1_lo_ps)
+        let t1_ps = map2!(_mm256_castsi256_ps, t1);
+        let t1_lo_ps = map2!(_mm256_moveldup_ps, t1_ps);
+        map2!(_mm256_castps_si256, t1_lo_ps)
     };
-    let res_lo = map3!(_mm256_blend_epi32::<0xaa>, mul_ll, t1_lo);
+    let res_lo = map2!(_mm256_blend_epi32::<0xaa>, mul_ll, t1_lo);
 
-    (res_lo, res_hi)
+    ((res_lo.0, res_lo.1, x.2), (res_hi.0, res_hi.1, x.2))
 }
 
 /// Addition, where the second operand is `0 <= y < 0xffffffff00000001`.
 #[inline(always)]
 unsafe fn add_small(
-    x_s: (__m256i, __m256i, __m256i),
-    y: (__m256i, __m256i, __m256i),
-) -> (__m256i, __m256i, __m256i) {
-    let res_wrapped_s = map3!(_mm256_add_epi64, x_s, y);
-    let mask = map3!(_mm256_cmpgt_epi32, x_s, res_wrapped_s);
-    let wrapback_amt = map3!(_mm256_srli_epi64::<32>, mask); // EPSILON if overflowed else 0.
-    let res_s = map3!(_mm256_add_epi64, res_wrapped_s, wrapback_amt);
+    x_s: (__m256i, __m256i),
+    y: (__m256i, __m256i),
+) -> (__m256i, __m256i) {
+    let res_wrapped_s = map2!(_mm256_add_epi64, x_s, y);
+    let mask = map2!(_mm256_cmpgt_epi32, x_s, res_wrapped_s);
+    let wrapback_amt = map2!(_mm256_srli_epi64::<32>, mask); // EPSILON if overflowed else 0.
+    let res_s = map2!(_mm256_add_epi64, res_wrapped_s, wrapback_amt);
     res_s
 }
 
@@ -201,12 +200,12 @@ unsafe fn maybe_adj_sub(res_wrapped_s: __m256i, mask: __m256i) -> __m256i {
 /// Addition, where the second operand is much smaller than `0xffffffff00000001`.
 #[inline(always)]
 unsafe fn sub_tiny(
-    x_s: (__m256i, __m256i, __m256i),
-    y: (__m256i, __m256i, __m256i),
-) -> (__m256i, __m256i, __m256i) {
-    let res_wrapped_s = map3!(_mm256_sub_epi64, x_s, y);
-    let mask = map3!(_mm256_cmpgt_epi32, res_wrapped_s, x_s);
-    let res_s = map3!(maybe_adj_sub, res_wrapped_s, mask);
+    x_s: (__m256i, __m256i),
+    y: (__m256i, __m256i),
+) -> (__m256i, __m256i) {
+    let res_wrapped_s = map2!(_mm256_sub_epi64, x_s, y);
+    let mask = map2!(_mm256_cmpgt_epi32, res_wrapped_s, x_s);
+    let res_s = map2!(maybe_adj_sub, res_wrapped_s, mask);
     res_s
 }
 
@@ -216,13 +215,14 @@ unsafe fn reduce3(
 ) -> (__m256i, __m256i, __m256i) {
     let sign_bit = _mm256_set1_epi64x(i64::MIN);
     let epsilon = _mm256_set1_epi64x(0xffffffff);
-    let lo0_s = map3!(_mm256_xor_si256, lo0, rep sign_bit);
-    let hi_hi0 = map3!(_mm256_srli_epi64::<32>, hi0);
+    let lo0_s = map2!(_mm256_xor_si256, lo0, rep sign_bit);
+    let hi_hi0 = map2!(_mm256_srli_epi64::<32>, hi0);
     let lo1_s = sub_tiny(lo0_s, hi_hi0);
-    let t1 = map3!(_mm256_mul_epu32, hi0, rep epsilon);
+    let t1 = map2!(_mm256_mul_epu32, hi0, rep epsilon);
     let lo2_s = add_small(lo1_s, t1);
-    let lo2 = map3!(_mm256_xor_si256, lo2_s, rep sign_bit);
-    lo2
+    let lo2 = map2!(_mm256_xor_si256, lo2_s, rep sign_bit);
+    (lo2.0, lo2.1, hi0.2)
+
 }
 
 #[inline(always)]
@@ -254,11 +254,12 @@ unsafe fn add_constants(state: (__m256i, __m256i, __m256i), constants: (__m256i,
 
     // We compute state + constants = state - (p - constants).
     let pv = _mm256_set1_epi64x(-4294967295i64); // goldilocks in i64
-    let p_const = map3!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed. maybe even shift the top bit for ease of calculations!
+    let p_const = map2!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed. maybe even shift the top bit for ease of calculations!
 
-    let res = map3!(_mm256_sub_epi64, state, p_const);
-    let mask = map3!(_mm256_cmpgt_epi32, res, state); // TODO: this doesn't work without the top bit xor?
-    map3!(maybe_adj_sub, res, mask)
+    let res = map2!(_mm256_sub_epi64, state, p_const);
+    let mask = map2!(_mm256_cmpgt_epi32, res, state); // TODO: this doesn't work without the top bit xor?
+    let res = map2!(maybe_adj_sub, res, mask);
+    (res.0, res.1, state.2)
 }
 
 #[inline(always)]
