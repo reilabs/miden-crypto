@@ -253,7 +253,7 @@ unsafe fn add_constants(state: (__m256i, __m256i, __m256i), constants: (__m256i,
 
 
     // We compute state + constants = state - (p - constants).
-    let pv = _mm256_set1_epi64x(0xFFFFFFFF00000001);
+    let pv = _mm256_set1_epi64x(-4294967295i64); // goldilocks in i64
     let p_const = map3!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed. maybe even shift the top bit for ease of calculations!
 
     let res = map3!(_mm256_sub_epi64, state, p_const);
@@ -324,7 +324,7 @@ unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, __m256i)) {
 #[inline(always)]
 pub unsafe fn plonky2_apply_sbox(
     buffer: &mut [u64; 12],
-    constants: &mut [u64; 12],
+    constants: &[u64; 12],
 ) {
     let mut state = avx2_load(&buffer);
     let constants = avx2_load(&constants);
@@ -336,7 +336,7 @@ pub unsafe fn plonky2_apply_sbox(
 #[inline(always)]
 pub unsafe fn plonky2_apply_inv_sbox(
     buffer: &mut [u64; 12],
-    constants: &mut [u64; 12],
+    constants: &[u64; 12],
 ) {
     let mut state = avx2_load(&buffer);
     let constants = avx2_load(&constants);
