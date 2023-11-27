@@ -73,6 +73,10 @@ macro_rules! map3 {
     ($f:ident, $v0:ident, $v1:ident) => {
         ($f($v0.0, $v1.0), $f($v0.1, $v1.1), $f($v0.2, $v1.2))
     };
+    ($f:ident, rep $v0:ident, $v1:ident) => {
+        ($f($v0, $v1.0), $f($v0, $v1.1), $f($v0, $v1.2))
+    };
+
     ($f:ident, $v0:ident, rep $v1:ident) => {
         ($f($v0.0, $v1), $f($v0.1, $v1), $f($v0.2, $v1))
     };
@@ -250,7 +254,7 @@ unsafe fn add_constants(state: (__m256i, __m256i, __m256i), constants: (__m256i,
 
     // We compute state + constants = state - (p - constants).
     let pv = _mm256_set1_epi64x(0xFFFFFFFF00000001);
-    let p_const = map3!(_mm256_sub_epi64, pv, constants); // TODO: can be precomputed
+    let p_const = map3!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed
 
     let res = map3!(_mm256_sub_epi64, state, p_const);
     let mask = map3!(_mm256_cmpgt_epi32, x, state); // TODO: this doesn't work without the top bit xor?
