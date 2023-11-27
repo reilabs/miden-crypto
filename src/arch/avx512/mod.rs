@@ -83,8 +83,18 @@ macro_rules! map2 {
 
 #[inline(always)]
 unsafe fn square3(
-    x: (__m256i, __m256i, __m256i),
-) -> ((__m256i, __m256i, __m256i), (__m256i, __m256i, __m256i)) {
+    x: (__m256i, __m256i, [u64; 4]),
+) -> ((__m256i, __m256i, [u64; 4]), (__m256i, __m256i, [u64; 4])) {
+    let z0 = x.2[0] as u128 * x.2[0] as u128;
+    let z1 = x.2[1] as u128 * x.2[1] as u128;
+    let z2 = x.2[2] as u128 * x.2[2] as u128;
+    let z3 = x.2[3] as u128 * x.2[3] as u128;
+
+    let z0_lo = z0 as u64;
+    let z1_lo = z1 as u64;
+    let z2_lo = z2 as u64;
+    let z3_lo = z3 as u64;
+
     let x_hi = {
         // Move high bits to low position. The high bits of x_hi are ignored. Swizzle is faster than
         // bitshift. This instruction only has a floating-point flavor, so we cast to/from float.
@@ -99,6 +109,11 @@ unsafe fn square3(
     let mul_lh = map2!(_mm256_mul_epu32, x, x_hi);
     let mul_hh = map2!(_mm256_mul_epu32, x_hi, x_hi);
 
+    let z0_hi = (z0 >> 64) as u64;
+    let z1_hi = (z1 >> 64) as u64;
+    let z2_hi = (z2 >> 64) as u64;
+    let z3_hi = (z3 >> 64) as u64;
+
     // Bignum addition, but mul_lh is shifted by 33 bits (not 32).
     let mul_ll_hi = map2!(_mm256_srli_epi64::<33>, mul_ll);
     let t0 = map2!(_mm256_add_epi64, mul_lh, mul_ll_hi);
@@ -110,14 +125,27 @@ unsafe fn square3(
     let mul_lh_lo = map2!(_mm256_slli_epi64::<33>, mul_lh);
     let res_lo = map2!(_mm256_add_epi64, mul_ll, mul_lh_lo);
 
-    ((res_lo.0, res_lo.1, x.2), (res_hi.0, res_hi.1, x.2))
+    (
+        (res_lo.0, res_lo.1, [z0_lo, z1_lo, z2_lo, z3_lo]),
+        (res_hi.0, res_hi.1, [z0_hi, z1_hi, z2_hi, z3_hi])
+    )
 }
 
 #[inline(always)]
 unsafe fn mul3(
-    x: (__m256i, __m256i, __m256i),
-    y: (__m256i, __m256i, __m256i),
-) -> ((__m256i, __m256i, __m256i), (__m256i, __m256i, __m256i)) {
+    x: (__m256i, __m256i, [u64; 4]),
+    y: (__m256i, __m256i, [u64; 4]),
+) -> ((__m256i, __m256i, [u64; 4]), (__m256i, __m256i, [u64; 4])) {
+    let z0 = x.2[0] as u128 * y.2[0] as u128;
+    let z1 = x.2[1] as u128 * y.2[1] as u128;
+    let z2 = x.2[2] as u128 * y.2[2] as u128;
+    let z3 = x.2[3] as u128 * y.2[3] as u128;
+
+    let z0_lo = z0 as u64;
+    let z1_lo = z1 as u64;
+    let z2_lo = z2 as u64;
+    let z3_lo = z3 as u64;
+
     let epsilon = _mm256_set1_epi64x(0xffffffff);
     let x_hi = {
         // Move high bits to low position. The high bits of x_hi are ignored. Swizzle is faster than
@@ -138,6 +166,11 @@ unsafe fn mul3(
     let mul_lh = map2!(_mm256_mul_epu32, x, y_hi);
     let mul_hl = map2!(_mm256_mul_epu32, x_hi, y);
     let mul_hh = map2!(_mm256_mul_epu32, x_hi, y_hi);
+
+    let z0_hi = (z0 >> 64) as u64;
+    let z1_hi = (z1 >> 64) as u64;
+    let z2_hi = (z2 >> 64) as u64;
+    let z3_hi = (z3 >> 64) as u64;
 
     // Bignum addition
     // Extract high 32 bits of mul_ll and add to mul_hl. This cannot overflow.
@@ -162,7 +195,10 @@ unsafe fn mul3(
     };
     let res_lo = map2!(_mm256_blend_epi32::<0xaa>, mul_ll, t1_lo);
 
-    ((res_lo.0, res_lo.1, x.2), (res_hi.0, res_hi.1, x.2))
+    (
+        (res_lo.0, res_lo.1, [z0_lo, z1_lo, z2_lo, z3_lo]),
+        (res_hi.0, res_hi.1, [z0_hi, z1_hi, z2_hi, z3_hi])
+    )
 }
 
 /// Addition, where the second operand is `0 <= y < 0xffffffff00000001`.
@@ -211,33 +247,56 @@ unsafe fn sub_tiny(
 
 #[inline(always)]
 unsafe fn reduce3(
-    (lo0, hi0): ((__m256i, __m256i, __m256i), (__m256i, __m256i, __m256i)),
-) -> (__m256i, __m256i, __m256i) {
+    (lo0, hi0): ((__m256i, __m256i, [u64; 4]), (__m256i, __m256i, [u64; 4])),
+) -> (__m256i, __m256i, [u64; 4]) {
+    let (a0, e0) = lo0.2[0].overflowing_add(lo0.2[0] << 32);
+    let (a1, e1) = lo0.2[1].overflowing_add(lo0.2[1] << 32);
+    let (a2, e2) = lo0.2[2].overflowing_add(lo0.2[2] << 32);
+    let (a3, e3) = lo0.2[3].overflowing_add(lo0.2[3] << 32);
+
     let sign_bit = _mm256_set1_epi64x(i64::MIN);
     let epsilon = _mm256_set1_epi64x(0xffffffff);
     let lo0_s = map2!(_mm256_xor_si256, lo0, rep sign_bit);
     let hi_hi0 = map2!(_mm256_srli_epi64::<32>, hi0);
+
+    let b0 = a0.wrapping_sub(a0 >> 32).wrapping_sub(e0 as u64);
+    let b1 = a1.wrapping_sub(a1 >> 32).wrapping_sub(e1 as u64);
+    let b2 = a2.wrapping_sub(a2 >> 32).wrapping_sub(e2 as u64);
+    let b3 = a3.wrapping_sub(a3 >> 32).wrapping_sub(e3 as u64);
+
     let lo1_s = sub_tiny(lo0_s, hi_hi0);
+
+    let (r0, c0) = hi0.2[0].overflowing_sub(b0);
+    let (r1, c1) = hi0.2[1].overflowing_sub(b1);
+    let (r2, c2) = hi0.2[2].overflowing_sub(b2);
+    let (r3, c3) = hi0.2[3].overflowing_sub(b3);
+
     let t1 = map2!(_mm256_mul_epu32, hi0, rep epsilon);
     let lo2_s = add_small(lo1_s, t1);
+
+    let res0 = r0.wrapping_sub(0u32.wrapping_sub(c0 as u32) as u64)
+    let res1 = r1.wrapping_sub(0u32.wrapping_sub(c1 as u32) as u64)
+    let res2 = r2.wrapping_sub(0u32.wrapping_sub(c2 as u32) as u64)
+    let res3 = r3.wrapping_sub(0u32.wrapping_sub(c3 as u32) as u64)
+
     let lo2 = map2!(_mm256_xor_si256, lo2_s, rep sign_bit);
-    (lo2.0, lo2.1, hi0.2)
+    (lo2.0, lo2.1, [res0, res1, res2, res3])
 
 }
 
 #[inline(always)]
-unsafe fn mul_reduce(a: (__m256i, __m256i, __m256i), b: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+unsafe fn mul_reduce(a: (__m256i, __m256i, [u64; 4]), b: (__m256i, __m256i, [u64; 4])) -> (__m256i, __m256i, [u64; 4]) {
     reduce3(mul3(a, b))
 }
 
 
 #[inline(always)]
-unsafe fn square_reduce(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+unsafe fn square_reduce(state: (__m256i, __m256i, [u64; 4])) -> (__m256i, __m256i, [u64; 4]) {
     reduce3(square3(state))
 }
 
 #[inline(always)]
-unsafe fn exp_acc(high: (__m256i, __m256i, __m256i), low: (__m256i, __m256i, __m256i), exp: usize) -> (__m256i, __m256i, __m256i) {
+unsafe fn exp_acc(high: (__m256i, __m256i, [u64; 4]), low: (__m256i, __m256i, [u64; 4]), exp: usize) -> (__m256i, __m256i, [u64; 4]) {
     let mut result = high;
     for _ in 0..exp {
         result = square_reduce(result);
@@ -246,7 +305,7 @@ unsafe fn exp_acc(high: (__m256i, __m256i, __m256i), low: (__m256i, __m256i, __m
 }
 
 #[inline(always)]
-unsafe fn add_constants(state: (__m256i, __m256i, __m256i), const_s: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+unsafe fn add_constants(state: (__m256i, __m256i, [u64; 4]), const_s: (__m256i, __m256i, [u64; 4])) -> (__m256i, __m256i, [u64; 4]) {
     let res = map2!(_mm256_sub_epi64, state, const_s);
     let mask = map2!(_mm256_cmpgt_epi32, res, state);
     let res = map2!(maybe_adj_sub, res, mask);
@@ -255,7 +314,7 @@ unsafe fn add_constants(state: (__m256i, __m256i, __m256i), const_s: (__m256i, _
 }
 
 #[inline(always)]
-unsafe fn plonky2_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+unsafe fn plonky2_sbox(state: (__m256i, __m256i, [u64; 4])) -> (__m256i, __m256i, [u64; 4]) {
     let state2 = square_reduce(state);
     let state4_unreduced = square3(state2);
     let state3_unreduced = mul3(state2, state);
@@ -267,7 +326,7 @@ unsafe fn plonky2_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i,
 }
 
 #[inline(always)]
-unsafe fn plonky2_inv_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+unsafe fn plonky2_inv_sbox(state: (__m256i, __m256i, [u64; 4])) -> (__m256i, __m256i, [u64; 4]) {
     // compute base^10540996611094048183 using 72 multiplications per array element
     // 10540996611094048183 = b1001001001001001001001001001000110110110110110110110110110110111
 
@@ -299,19 +358,19 @@ unsafe fn plonky2_inv_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m2
 }
 
 #[inline(always)]
-unsafe fn avx2_load(state: &[u64; 12]) -> (__m256i, __m256i, __m256i) {
+unsafe fn avx2_load(state: &[u64; 12]) -> (__m256i, __m256i, [u64; 4]) {
     (
         _mm256_loadu_si256((&state[0..4]).as_ptr().cast::<__m256i>()),
         _mm256_loadu_si256((&state[4..8]).as_ptr().cast::<__m256i>()),
-        _mm256_loadu_si256((&state[8..12]).as_ptr().cast::<__m256i>()),
+        state[8..12].into()
     )
 }
 
 #[inline(always)]
-unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, __m256i)) {
+unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, [u64; 4])) {
     _mm256_storeu_si256((&mut buf[0..4]).as_mut_ptr().cast::<__m256i>(), state.0);
     _mm256_storeu_si256((&mut buf[4..8]).as_mut_ptr().cast::<__m256i>(), state.1);
-    _mm256_storeu_si256((&mut buf[8..12]).as_mut_ptr().cast::<__m256i>(), state.2);
+    buf[8..12].copy_from_slice(&state.2);
 }
 
 #[inline(always)]
