@@ -254,10 +254,10 @@ unsafe fn add_constants(state: (__m256i, __m256i, __m256i), constants: (__m256i,
 
     // We compute state + constants = state - (p - constants).
     let pv = _mm256_set1_epi64x(0xFFFFFFFF00000001);
-    let p_const = map3!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed
+    let p_const = map3!(_mm256_sub_epi64, rep pv, constants); // TODO: can be precomputed. maybe even shift the top bit for ease of calculations!
 
     let res = map3!(_mm256_sub_epi64, state, p_const);
-    let mask = map3!(_mm256_cmpgt_epi32, x, state); // TODO: this doesn't work without the top bit xor?
+    let mask = map3!(_mm256_cmpgt_epi32, res, state); // TODO: this doesn't work without the top bit xor?
     map3!(maybe_adj_sub, res, mask)
 }
 
