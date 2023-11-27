@@ -67,7 +67,7 @@ macro_rules! map2 {
         )
     };
     ($f:ident, $v:ident) => {
-        ($f($v.0), $f($v.1)))
+        ($f($v.0), $f($v.1))
     };
     ($f:ident, $v0:ident, $v1:ident) => {
         ($f($v0.0, $v1.0), $f($v0.1, $v1.1))
