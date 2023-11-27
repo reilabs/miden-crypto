@@ -941,7 +941,7 @@ const ARK1_SHIFT: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
     [
         Felt::new(Ms - 5789762306288267392),
         Felt::new(Ms - 6522564764413701783),
-        Felt::new(Ms - 17809893479458208203),
+        Felt::new(Ms.wrapping_sub(17809893479458208203)),
         Felt::new(Ms - 107145243989736508),
         Felt::new(Ms - 6388978042437517382),
         Felt::new(Ms - 15844067734406016715),
@@ -1040,7 +1040,7 @@ const ARK1_SHIFT: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
 const ARK2_SHIFT: [[Felt; STATE_WIDTH]; NUM_ROUNDS] = [
     [
         Felt::new(Ms - 6077062762357204287),
-        Felt::new(Ms - 15277620170502011191),
+        Felt::new(Ms.wrapping_sub(15277620170502011191)),
         Felt::new(Ms - 5358738125714196705),
         Felt::new(Ms - 14233283787297595718),
         Felt::new(Ms - 13792579614346651365),
