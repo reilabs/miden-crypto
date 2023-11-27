@@ -241,6 +241,21 @@ unsafe fn exp_acc(high: (__m256i, __m256i, __m256i), low: (__m256i, __m256i, __m
     mul_reduce(result, low)
 }
 
+#[inline(always)]
+unsafe fn add_constants(state: (__m256i, __m256i, __m256i), constants: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
+    // let (x1, c1) = self.0.overflowing_sub(M - rhs.0);
+    // let adj = 0u32.wrapping_sub(c1 as u32);
+    // Self(x1.wrapping_sub(adj as u64))
+
+
+    // We compute state + constants = state - (p - constants).
+    let pv = _mm256_set1_epi64x(0xFFFFFFFF00000001);
+    let p_const = map3!(_mm256_sub_epi64, pv, constants); // TODO: can be precomputed
+
+    let res = map3!(_mm256_sub_epi64, state, p_const);
+    let mask = map3!(_mm256_cmpgt_epi32, x, state); // TODO: this doesn't work without the top bit xor?
+    map3!(maybe_adj_sub, res, mask)
+}
 
 #[inline(always)]
 unsafe fn plonky2_sbox(state: (__m256i, __m256i, __m256i)) -> (__m256i, __m256i, __m256i) {
@@ -304,18 +319,24 @@ unsafe fn avx2_store(buf: &mut [u64; 12], state: (__m256i, __m256i, __m256i)) {
 
 #[inline(always)]
 pub unsafe fn plonky2_apply_sbox(
-    buffer: &mut [u64; 12]
+    buffer: &mut [u64; 12],
+    constants: &mut [u64; 12],
 ) {
     let mut state = avx2_load(&buffer);
+    let constants = avx2_load(&constants);
+    state = add_constants(state, constants);
     state = plonky2_sbox(state);
     avx2_store(buffer, state);
 }
 
 #[inline(always)]
 pub unsafe fn plonky2_apply_inv_sbox(
-    buffer: &mut [u64; 12]
+    buffer: &mut [u64; 12],
+    constants: &mut [u64; 12],
 ) {
     let mut state = avx2_load(&buffer);
+    let constants = avx2_load(&constants);
+    state = add_constants(state, constants);
     state = plonky2_inv_sbox(state);
     avx2_store(buffer, state);
 }

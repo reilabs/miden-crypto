@@ -404,10 +404,10 @@ impl Rpo256 {
         state: &mut [Felt; STATE_WIDTH],
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
-        Self::add_constants(state, ark);
         unsafe {
-            let buffer = std::mem::transmute(state);
-            plonky2_apply_sbox(buffer);
+            let state = std::mem::transmute(state);
+            let ark = std::mem::transmute(ark);
+            plonky2_apply_sbox(state, ark);
         }
         true
     }
@@ -441,10 +441,10 @@ impl Rpo256 {
         state: &mut [Felt; STATE_WIDTH],
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
-        Self::add_constants(state, ark);
         unsafe {
-            let buffer = std::mem::transmute(state);
-            plonky2_apply_inv_sbox(buffer);
+            let state = std::mem::transmute(state);
+            let ark = std::mem::transmute(ark);
+            plonky2_apply_inv_sbox(state, ark);
         }
         true
     }
