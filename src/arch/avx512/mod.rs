@@ -362,7 +362,7 @@ unsafe fn avx2_load(state: &[u64; 12]) -> (__m256i, __m256i, [u64; 4]) {
     (
         _mm256_loadu_si256((&state[0..4]).as_ptr().cast::<__m256i>()),
         _mm256_loadu_si256((&state[4..8]).as_ptr().cast::<__m256i>()),
-        state[8..12].into()
+        state[8..12].try_into().unwrap()
     )
 }
 
