@@ -15,6 +15,11 @@ pub use rpx::{Rpx256, RpxDigest};
 #[cfg(test)]
 mod tests;
 
+#[cfg(target_feature = "avx2")]
+use crate::arch::x86_64_avx2::{
+    apply_inv_sbox as optimized_inv_sbox, apply_sbox as optimized_sbox,
+};
+
 // CONSTANTS
 // ================================================================================================
 
@@ -157,7 +162,20 @@ fn optimized_add_constants_and_apply_sbox(
 }
 
 #[inline(always)]
-#[cfg(not(all(target_feature = "sve", feature = "sve")))]
+#[cfg(target_feature = "avx2")]
+fn optimized_add_constants_and_apply_sbox(
+    state: &mut [Felt; STATE_WIDTH],
+    ark: &[Felt; STATE_WIDTH],
+) -> bool {
+    add_constants(state, ark);
+    unsafe {
+        optimized_sbox(std::mem::transmute(state));
+    }
+    true
+}
+
+#[inline(always)]
+#[cfg(not(any(target_feature = "avx2", all(target_feature = "sve", feature = "sve"))))]
 fn optimized_add_constants_and_apply_sbox(
     _state: &mut [Felt; STATE_WIDTH],
     _ark: &[Felt; STATE_WIDTH],
@@ -177,7 +195,20 @@ fn optimized_add_constants_and_apply_inv_sbox(
 }
 
 #[inline(always)]
-#[cfg(not(all(target_feature = "sve", feature = "sve")))]
+#[cfg(target_feature = "avx2")]
+fn optimized_add_constants_and_apply_inv_sbox(
+    state: &mut [Felt; STATE_WIDTH],
+    ark: &[Felt; STATE_WIDTH],
+) -> bool {
+    add_constants(state, ark);
+    unsafe {
+        optimized_inv_sbox(std::mem::transmute(state));
+    }
+    true
+}
+
+#[inline(always)]
+#[cfg(not(any(target_feature = "avx2", all(target_feature = "sve", feature = "sve"))))]
 fn optimized_add_constants_and_apply_inv_sbox(
     _state: &mut [Felt; STATE_WIDTH],
     _ark: &[Felt; STATE_WIDTH],
