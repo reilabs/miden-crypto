@@ -99,6 +99,8 @@ extern inline void mul(
 
     svuint64_t l1 = svmul_x(pg, *r1, *op1);
     svuint64_t l2 = svmul_x(pg, *r2, *op2);
+    svuint64_t h1 = svmulh_x(pg, *r1, *op1);
+    svuint64_t h2 = svmulh_x(pg, *r2, *op2);
 
     uint64_t x1_1 = (x_1 >> 64);
     uint64_t x1_2 = (x_2 >> 64);
@@ -139,9 +141,6 @@ extern inline void mul(
     uint32_t c_2 = __builtin_sub_overflow(x1_2, b_2, &r_2);
     uint32_t c_3 = __builtin_sub_overflow(x1_3, b_3, &r_3);
     uint32_t c_4 = __builtin_sub_overflow(x1_4, b_4, &r_4);
-
-    svuint64_t h1 = svmulh_x(pg, *r1, *op1);
-    svuint64_t h2 = svmulh_x(pg, *r2, *op2);
 
     svuint64_t tr1 = svsub_x(pg, h1, b1);
     svuint64_t tr2 = svsub_x(pg, h2, b2);
