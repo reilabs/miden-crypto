@@ -1,7 +1,7 @@
 #[cfg(all(target_feature = "sve", feature = "sve"))]
 pub mod optimized {
-    use crate::Felt;
     use crate::hash::rescue::STATE_WIDTH;
+    use crate::Felt;
 
     #[link(name = "rpo_sve", kind = "static")]
     extern "C" {
@@ -31,7 +31,10 @@ pub mod optimized {
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
         unsafe {
-            add_constants_and_apply_inv_sbox(state.as_mut_ptr() as *mut u64, ark.as_ptr() as *const u64)
+            add_constants_and_apply_inv_sbox(
+                state.as_mut_ptr() as *mut u64,
+                ark.as_ptr() as *const u64,
+            )
         }
     }
 }
@@ -41,9 +44,9 @@ pub mod x86_64_avx2;
 
 #[cfg(target_feature = "avx2")]
 pub mod optimized {
-    use crate::Felt;
-    use crate::hash::rescue::{add_constants, STATE_WIDTH};
     use super::x86_64_avx2::{apply_inv_sbox, apply_sbox};
+    use crate::hash::rescue::{add_constants, STATE_WIDTH};
+    use crate::Felt;
 
     #[inline(always)]
     pub fn add_constants_and_apply_sbox(
@@ -68,13 +71,12 @@ pub mod optimized {
         }
         true
     }
-
 }
 
 #[cfg(not(any(target_feature = "avx2", all(target_feature = "sve", feature = "sve"))))]
 pub mod optimized {
+    use crate::hash::rescue::STATE_WIDTH;
     use crate::Felt;
-    use crate::hash::rescue::{add_constants, STATE_WIDTH};
 
     #[inline(always)]
     pub fn add_constants_and_apply_sbox(
