@@ -37,12 +37,13 @@ pub mod optimized {
 }
 
 #[cfg(target_feature = "avx2")]
-pub mod optimized {
-    mod x86_64_avx2;
+pub mod x86_64_avx2;
 
+#[cfg(target_feature = "avx2")]
+pub mod optimized {
     use crate::Felt;
     use crate::hash::rescue::STATE_WIDTH;
-    use x86_64_avx2::{
+    use super::x86_64_avx2::{
         apply_inv_sbox as optimized_inv_sbox, apply_sbox as optimized_sbox,
     };
 
