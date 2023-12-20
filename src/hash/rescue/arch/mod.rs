@@ -6,11 +6,11 @@ pub mod optimized {
     mod ffi {
         #[link(name = "rpo_sve", kind = "static")]
         extern "C" {
-            fn add_constants_and_apply_sbox(
+            pub fn add_constants_and_apply_sbox(
                 state: *mut std::ffi::c_ulong,
                 constants: *const std::ffi::c_ulong,
             ) -> bool;
-            fn add_constants_and_apply_inv_sbox(
+            pub fn add_constants_and_apply_inv_sbox(
                 state: *mut std::ffi::c_ulong,
                 constants: *const std::ffi::c_ulong,
             ) -> bool;
