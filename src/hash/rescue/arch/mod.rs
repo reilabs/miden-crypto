@@ -42,10 +42,8 @@ pub mod x86_64_avx2;
 #[cfg(target_feature = "avx2")]
 pub mod optimized {
     use crate::Felt;
-    use crate::hash::rescue::STATE_WIDTH;
-    use super::x86_64_avx2::{
-        apply_inv_sbox as optimized_inv_sbox, apply_sbox as optimized_sbox,
-    };
+    use crate::hash::rescue::{add_constants, STATE_WIDTH};
+    use super::x86_64_avx2::{apply_inv_sbox, apply_sbox};
 
     #[inline(always)]
     pub fn add_constants_and_apply_sbox(
@@ -54,7 +52,7 @@ pub mod optimized {
     ) -> bool {
         add_constants(state, ark);
         unsafe {
-            optimized_sbox(std::mem::transmute(state));
+            apply_sbox(std::mem::transmute(state));
         }
         true
     }
@@ -66,7 +64,7 @@ pub mod optimized {
     ) -> bool {
         add_constants(state, ark);
         unsafe {
-            optimized_inv_sbox(std::mem::transmute(state));
+            apply_inv_sbox(std::mem::transmute(state));
         }
         true
     }
@@ -76,7 +74,7 @@ pub mod optimized {
 #[cfg(not(any(target_feature = "avx2", all(target_feature = "sve", feature = "sve"))))]
 pub mod optimized {
     use crate::Felt;
-    use crate::hash::rescue::STATE_WIDTH;
+    use crate::hash::rescue::{add_constants, STATE_WIDTH};
 
     #[inline(always)]
     pub fn add_constants_and_apply_sbox(
