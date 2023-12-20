@@ -3,16 +3,18 @@ pub mod optimized {
     use crate::hash::rescue::STATE_WIDTH;
     use crate::Felt;
 
-    #[link(name = "rpo_sve", kind = "static")]
-    extern "C" {
-        fn add_constants_and_apply_sbox(
-            state: *mut std::ffi::c_ulong,
-            constants: *const std::ffi::c_ulong,
-        ) -> bool;
-        fn add_constants_and_apply_inv_sbox(
-            state: *mut std::ffi::c_ulong,
-            constants: *const std::ffi::c_ulong,
-        ) -> bool;
+    mod ffi {
+        #[link(name = "rpo_sve", kind = "static")]
+        extern "C" {
+            fn add_constants_and_apply_sbox(
+                state: *mut std::ffi::c_ulong,
+                constants: *const std::ffi::c_ulong,
+            ) -> bool;
+            fn add_constants_and_apply_inv_sbox(
+                state: *mut std::ffi::c_ulong,
+                constants: *const std::ffi::c_ulong,
+            ) -> bool;
+        }
     }
 
     #[inline(always)]
@@ -21,7 +23,10 @@ pub mod optimized {
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
         unsafe {
-            add_constants_and_apply_sbox(state.as_mut_ptr() as *mut u64, ark.as_ptr() as *const u64)
+            ffi::add_constants_and_apply_sbox(
+                state.as_mut_ptr() as *mut u64,
+                ark.as_ptr() as *const u64,
+            )
         }
     }
 
@@ -31,7 +36,7 @@ pub mod optimized {
         ark: &[Felt; STATE_WIDTH],
     ) -> bool {
         unsafe {
-            add_constants_and_apply_inv_sbox(
+            ffi::add_constants_and_apply_inv_sbox(
                 state.as_mut_ptr() as *mut u64,
                 ark.as_ptr() as *const u64,
             )
