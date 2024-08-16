@@ -262,6 +262,32 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
         leaf.hash()
     }
 
+    fn hash_prospective_leaf(&self, key: &RpoDigest, value: &Word) -> RpoDigest {
+        let leaf_index = Self::key_to_leaf_index(key);
+
+        // The he hash always depends on if we already have a leaf at this
+        // key or not.
+        match self.leaves.get(&leaf_index.value()) {
+            Some(existing_leaf) => {
+                // TODO: avoid cloning the leaf, which is potentially expensive
+                // for leaves with multiple values.
+                let mut cloned = existing_leaf.clone();
+                if value == &Self::EMPTY_VALUE {
+                    cloned.remove(*key);
+                } else {
+                    cloned.insert(*key, *value);
+                }
+                cloned.hash()
+            },
+            None => {
+                if value == &Self::EMPTY_VALUE {
+                    return SmtLeaf::new_empty(leaf_index).hash();
+                }
+                SmtLeaf::new_single(*key, *value).hash()
+            },
+        }
+    }
+
     fn key_to_leaf_index(key: &RpoDigest) -> LeafIndex<SMT_DEPTH> {
         let most_significant_felt = key[3];
         LeafIndex::new_max_depth(most_significant_felt.as_int())

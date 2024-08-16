@@ -301,6 +301,10 @@ impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
         leaf.into()
     }
 
+    fn hash_prospective_leaf(&self, _: &LeafIndex<DEPTH>, value: &Word) -> RpoDigest {
+        Self::hash_leaf(value)
+    }
+
     fn key_to_leaf_index(key: &LeafIndex<DEPTH>) -> LeafIndex<DEPTH> {
         *key
     }

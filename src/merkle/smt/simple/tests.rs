@@ -443,6 +443,90 @@ fn test_simplesmt_set_subtree_entire_tree() {
     assert_eq!(tree.root(), *EmptySubtreeRoots::entry(DEPTH, 0));
 }
 
+/// Tests that we can correctly calculate leaf hashes before actually inserting them.
+#[test]
+fn test_prospective_hash() {
+    const DEPTH: u8 = 3;
+    type SimpleSmt = super::SimpleSmt::<DEPTH>;
+    const EMPTY: Word = SimpleSmt::EMPTY_VALUE;
+    let mut smt = SimpleSmt::new().unwrap();
+
+    let key = |num: u64| LeafIndex::<DEPTH>::new(num).unwrap();
+
+    let key_1 = key(3);
+    let value_1 = int_to_leaf(9);
+
+    let key_2 = key(4);
+    let value_2 = int_to_leaf(12);
+
+    let key_3 = key(5);
+    let value_3 = int_to_leaf(15);
+    let value_3_2 = int_to_leaf(20);
+
+    // Prospective hashes before insertion should be equal to actual hashes
+    // after insertion.
+    {
+        // That includes inserting empty values on an empty tree.
+        let prospective_empty = smt.hash_prospective_leaf(&key_1, &EMPTY);
+        smt.insert(key_1, EMPTY);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_1)), prospective_empty);
+
+        let prospective = smt.hash_prospective_leaf(&key_1, &value_1);
+        smt.insert(key_1, value_1);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_1)), prospective);
+    }
+
+    {
+        let prospective = smt.hash_prospective_leaf(&key_2, &value_2);
+        smt.insert(key_2, value_2);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_2)), prospective);
+    }
+
+    {
+        let prospective = smt.hash_prospective_leaf(&key_3, &value_3);
+        smt.insert(key_3, value_3);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_3)), prospective);
+
+        let prospective_multi = smt.hash_prospective_leaf(&key_3, &value_3_2);
+        smt.insert(key_3, value_3_2);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_3)), prospective_multi);
+    }
+
+    // Prospective hashes after removal should be equal to actual hashes
+    // before removal, and prospective hashes *for* the removal should be
+    // equal to actual hashes after the removal.
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_3, &EMPTY);
+        let old_hash = SimpleSmt::hash_leaf(&smt.get_leaf(&key_3));
+        smt.insert(key_3, EMPTY);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_3, &value_3_2));
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_3)), prospective_empty);
+
+        let prospective_empty_2 = smt.hash_prospective_leaf(&key_3, &EMPTY);
+        let old_hash_2 = SimpleSmt::hash_leaf(&smt.get_leaf(&key_3));
+        assert_ne!(old_hash, old_hash_2);
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_3)), prospective_empty_2);
+        smt.insert(key_3, EMPTY);
+        assert_eq!(old_hash_2, smt.hash_prospective_leaf(&key_3, &EMPTY));
+    }
+
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_2, &EMPTY);
+        let old_hash = SimpleSmt::hash_leaf(&smt.get_leaf(&key_2));
+        smt.insert(key_2, EMPTY);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_2, &value_2));
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_2)), prospective_empty);
+    }
+
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_1, &EMPTY);
+        let old_hash = SimpleSmt::hash_leaf(&smt.get_leaf(&key_1));
+        smt.insert(key_1, EMPTY);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_1, &value_1));
+        assert_eq!(SimpleSmt::hash_leaf(&smt.get_leaf(&key_1)), prospective_empty);
+    }
+}
+
 // HELPER FUNCTIONS
 // --------------------------------------------------------------------------------------------
 

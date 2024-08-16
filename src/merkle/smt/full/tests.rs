@@ -1,6 +1,6 @@
 use super::{Felt, LeafIndex, NodeIndex, Rpo256, RpoDigest, Smt, SmtLeaf, EMPTY_WORD, SMT_DEPTH};
 use crate::{
-    merkle::{EmptySubtreeRoots, MerkleStore},
+    merkle::{smt::SparseMerkleTree, EmptySubtreeRoots, MerkleStore},
     utils::{Deserializable, Serializable},
     Word, ONE, WORD_SIZE,
 };
@@ -324,6 +324,87 @@ fn test_smt_entries() {
     assert_eq!(&(key_1, value_1), entries.next().unwrap());
     assert_eq!(&(key_2, value_2), entries.next().unwrap());
     assert!(entries.next().is_none());
+}
+
+/// Tests that we can correctly calculate leaf hashes before actually inserting them.
+#[test]
+fn test_prospective_hash() {
+    let mut smt = Smt::default();
+
+    let raw = 0b_01101001_01101100_00011111_11111111_10010110_10010011_11100000_00000000_u64;
+
+    let key_1 = RpoDigest::from([ONE, ONE, ONE, Felt::new(raw)]);
+    let key_2 = RpoDigest::from([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(raw)]);
+    let key_3 = RpoDigest::from([3_u32.into(), 3_u32.into(), 3_u32.into(), Felt::new(raw)]);
+
+    let value_1 = [ONE; WORD_SIZE];
+    let value_2: [Felt; 4] = [2_u32.into(); WORD_SIZE];
+    let value_3: [Felt; 4] = [3_u32.into(); WORD_SIZE];
+    let value_3_2: [Felt; 4] = [3_u32.into(), 2_u32.into(), 2_u32.into(), 2_u32.into()];
+
+    // Prospective hashes before insertion should be equal to actual hashes
+    // after insertion.
+    {
+        // That includes inserting empty values on an empty tree.
+        let prospective_empty = smt.hash_prospective_leaf(&key_1, &Smt::EMPTY_VALUE);
+        smt.insert(key_1, Smt::EMPTY_VALUE);
+        assert_eq!(smt.get_leaf(&key_1).hash(), prospective_empty);
+
+        let prospective = smt.hash_prospective_leaf(&key_1, &value_1);
+        smt.insert(key_1, value_1);
+        let actual = smt.get_leaf(&key_1).hash();
+        assert_eq!(actual, prospective);
+    }
+
+    {
+        let prospective = smt.hash_prospective_leaf(&key_2, &value_2);
+        smt.insert(key_2, value_2);
+        assert_eq!(smt.get_leaf(&key_2).hash(), prospective);
+    }
+
+    {
+        let prospective = smt.hash_prospective_leaf(&key_3, &value_3);
+        smt.insert(key_3, value_3);
+        assert_eq!(smt.get_leaf(&key_3).hash(), prospective);
+
+        let prospective_multi = smt.hash_prospective_leaf(&key_3, &value_3_2);
+        smt.insert(key_3, value_3_2);
+        assert_eq!(smt.get_leaf(&key_3).hash(), prospective_multi);
+    }
+
+    // Prospective hashes after removal should be equal to actual hashes
+    // before removal, and prospective hashes *for* the removal should be
+    // equal to actual hashes after the removal.
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_3, &Smt::EMPTY_VALUE);
+        let old_hash = smt.get_leaf(&key_3).hash();
+        smt.insert(key_3, Smt::EMPTY_VALUE);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_3, &value_3_2));
+        assert_eq!(smt.get_leaf(&key_3).hash(), prospective_empty);
+
+        let prospective_empty_2 = smt.hash_prospective_leaf(&key_3, &Smt::EMPTY_VALUE);
+        let old_hash_2 = smt.get_leaf(&key_3).hash();
+        assert_ne!(old_hash, old_hash_2);
+        assert_eq!(smt.get_leaf(&key_3).hash(), prospective_empty_2);
+        smt.insert(key_3, Smt::EMPTY_VALUE);
+        assert_eq!(old_hash_2, smt.hash_prospective_leaf(&key_3, &Smt::EMPTY_VALUE));
+    }
+
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_2, &Smt::EMPTY_VALUE);
+        let old_hash = smt.get_leaf(&key_2).hash();
+        smt.insert(key_2, Smt::EMPTY_VALUE);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_2, &value_2));
+        assert_eq!(smt.get_leaf(&key_2).hash(), prospective_empty);
+    }
+
+    {
+        let prospective_empty = smt.hash_prospective_leaf(&key_1, &Smt::EMPTY_VALUE);
+        let old_hash = smt.get_leaf(&key_1).hash();
+        smt.insert(key_1, Smt::EMPTY_VALUE);
+        assert_eq!(old_hash, smt.hash_prospective_leaf(&key_1, &value_1));
+        assert_eq!(smt.get_leaf(&key_1).hash(), prospective_empty);
+    }
 }
 
 // SMT LEAF

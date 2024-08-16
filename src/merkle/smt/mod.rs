@@ -166,6 +166,15 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// Returns the hash of a leaf
     fn hash_leaf(leaf: &Self::Leaf) -> RpoDigest;
 
+    /// Returns the hash of a leaf if the leaf WERE inserted into the tree,
+    /// without performing any insertion or other mutation.
+    ///
+    /// Note: calling this function after actually performing an insert with
+    /// the same arguments will *not* return the same result, as inserting
+    /// multiple times with the same key mutates the leaf each time.
+    #[allow(dead_code)] // Coming soon :)
+    fn hash_prospective_leaf(&self, key: &Self::Key, value: &Self::Value) -> RpoDigest;
+
     /// Maps a key to a leaf index
     fn key_to_leaf_index(key: &Self::Key) -> LeafIndex<DEPTH>;
 
