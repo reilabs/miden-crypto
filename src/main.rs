@@ -95,8 +95,14 @@ pub fn batched_insertion(tree: &mut Smt, size: u64) -> Result<(), MerkleError> {
         .collect();
 
     let now = Instant::now();
-    let mutations = tree.compute_mutations(new_pairs);
+    let mutations = tree.compute_mutations(new_pairs.clone());
     let compute_elapsed = now.elapsed();
+
+    let now = Instant::now();
+    let mutations_sequential = tree.compute_mutations_sequential(new_pairs);
+    let compute_elapsed_sequential = now.elapsed();
+
+    assert_eq!(mutations.root(), mutations_sequential.root());
 
     let now = Instant::now();
     tree.apply_mutations(mutations).unwrap();
@@ -109,6 +115,15 @@ pub fn batched_insertion(tree: &mut Smt, size: u64) -> Result<(), MerkleError> {
         // Dividing by the number of iterations, 1000, and then multiplying by 1000 to get
         // milliseconds, cancels out.
         compute_elapsed.as_secs_f32(),
+    );
+
+    println!(
+        "An average sequential batch computation time measured by a 1k-batch into an SMT with {} key-value pairs over {:.3} milliseconds is {:.3} milliseconds",
+        size,
+        compute_elapsed_sequential.as_secs_f32() * 1000f32,
+        // Dividing by the number of iterations, 1000, and then multiplying by 1000 to get
+        // milliseconds, cancels out.
+        compute_elapsed_sequential.as_secs_f32(),
     );
 
     println!(

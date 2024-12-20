@@ -46,11 +46,11 @@ pub const SMT_MAX_DEPTH: u8 = 64;
 /// must accomodate all keys that map to the same leaf.
 ///
 /// [SparseMerkleTree] currently doesn't support optimizations that compress Merkle proofs.
-pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
+pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
     /// The type for a key
-    type Key: Clone + Ord;
+    type Key: Clone + Ord + Send;
     /// The type for a value
-    type Value: Clone + PartialEq;
+    type Value: Clone + PartialEq + Send;
     /// The type for a leaf
     type Leaf: Clone;
     /// The type for an opening (i.e. a "proof") of a leaf
@@ -169,6 +169,22 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
         &self,
         kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
     ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
+        #[cfg(feature = "concurrent")]
+        {
+            self.compute_mutations_parallel(kv_pairs)
+        }
+        #[cfg(not(feature = "concurrent"))]
+        {
+            self.compute_mutations_sequential(kv_pairs)
+        }
+    }
+
+    /// Sequential version of [`SparseMerkleTree::compute_mutations()`].
+    /// This is the default implementation.
+    fn compute_mutations_sequential(
+        &self,
+        kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
+    ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
         use NodeMutation::*;
 
         let mut new_root = self.root();
@@ -253,6 +269,139 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
             node_mutations,
             new_pairs,
         }
+    }
+    /// Parallel version of [`SparseMerkleTree::compute_mutations()`].
+    #[cfg(feature = "concurrent")]
+    fn compute_mutations_parallel(
+        &self,
+        kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
+    ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
+        use rayon::prelude::*;
+
+        let kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
+
+        let mut updates_by_leaf: BTreeMap<NodeIndex, Vec<(Self::Key, Self::Value)>> =
+            BTreeMap::new();
+
+        // Group updates by leaf index
+        for (key, value) in kv_pairs {
+            let leaf_idx = Self::key_to_leaf_index(&key);
+            let node_index = NodeIndex::from(leaf_idx);
+            updates_by_leaf
+                .entry(node_index)
+                .or_insert_with(|| Vec::with_capacity(2))
+                .push((key, value));
+        }
+
+        // Process leaves in parallel with pre-allocated vectors
+        let leaves_data: Vec<(NodeIndex, RpoDigest, BTreeMap<Self::Key, Self::Value>)> =
+            updates_by_leaf
+                .into_par_iter()
+                .map(|(leaf_idx, updates)| {
+                    let (first_key, _) = &updates[0];
+                    let leaf = self.get_leaf(first_key);
+
+                    let leaf_kv_map = updates.iter().fold(leaf, |mut acc_leaf, (key, value)| {
+                        acc_leaf = self.construct_prospective_leaf(acc_leaf, key, value);
+                        acc_leaf
+                    });
+
+                    let final_leaf_hash = Self::hash_leaf(&leaf_kv_map);
+                    let leaf_kv_map = BTreeMap::from_iter(updates);
+
+                    (leaf_idx, final_leaf_hash, leaf_kv_map)
+                })
+                .collect();
+
+        let mut leaf_hash_map = BTreeMap::new();
+        let mut new_pairs = BTreeMap::new();
+        let mut node_mutations = BTreeMap::new();
+
+        for (leaf_idx, final_hash, final_map) in leaves_data {
+            leaf_hash_map.insert(leaf_idx, final_hash);
+            new_pairs.extend(final_map);
+        }
+
+        let mut current_level_hashes = leaf_hash_map;
+        let mut new_root = self.root();
+
+        // Process levels in parallel
+        for node_depth in (0..DEPTH).rev() {
+            let next_level_pairs =
+                self.rebuild_level_in_parallel(&current_level_hashes, node_depth);
+
+            let mut next_level_hashes = BTreeMap::new();
+            for (parent_idx, new_hash, new_entry) in next_level_pairs {
+                node_mutations.insert(parent_idx, new_entry);
+                next_level_hashes.insert(parent_idx, new_hash);
+            }
+
+            current_level_hashes = next_level_hashes;
+
+            if node_depth == 0 {
+                if let Some((_, root_hash)) = current_level_hashes.iter().next() {
+                    new_root = *root_hash;
+                }
+            }
+        }
+
+        MutationSet {
+            old_root: self.root(),
+            new_root,
+            node_mutations,
+            new_pairs,
+        }
+    }
+
+    // Building a single level in parallel.
+    #[cfg(feature = "concurrent")]
+    fn rebuild_level_in_parallel(
+        &self,
+        child_hashes: &BTreeMap<NodeIndex, RpoDigest>,
+        node_depth: u8,
+    ) -> Vec<(NodeIndex, RpoDigest, NodeMutation)> {
+        use alloc::vec::Vec;
+        use rayon::prelude::*;
+
+        // Pre-calculate parent indexes and its children
+        let mut by_parent: BTreeMap<NodeIndex, Vec<(NodeIndex, RpoDigest)>> = BTreeMap::new();
+        for (&child_idx, &child_hash) in child_hashes.iter() {
+            let mut parent_idx = child_idx;
+            parent_idx.move_up();
+
+            by_parent.entry(parent_idx).or_insert(Vec::with_capacity(2)).push((child_idx, child_hash));
+        }
+
+        // Process parents in parallel with optimal chunk size
+        by_parent
+            .into_par_iter()
+            .map(|(parent_idx, children)| {
+                let parent_node = self.get_inner_node(parent_idx);
+                let mut left = parent_node.left;
+                let mut right = parent_node.right;
+
+                // Update left/right based on children
+                for (child_idx, child_hash) in children {
+                    if child_idx.is_value_odd() {
+                        right = child_hash;
+                    } else {
+                        left = child_hash;
+                    }
+                }
+
+                let new_node = InnerNode { left, right };
+                let new_hash = new_node.hash();
+
+                let &equiv_empty_hash = EmptySubtreeRoots::entry(DEPTH, node_depth);
+                let new_entry = if new_hash == equiv_empty_hash {
+                    NodeMutation::Removal
+                } else {
+                    NodeMutation::Addition(new_node)
+                };
+
+                (parent_idx, new_hash, new_entry)
+            })
+            .collect()
     }
 
     /// Apply the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
