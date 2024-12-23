@@ -14,6 +14,8 @@ pub struct BenchmarkCmd {
     /// Size of the tree
     #[clap(short = 's', long = "size")]
     size: u64,
+    #[clap(short = 'm', long = "mutations")]
+    mutations: u64,
 }
 
 fn main() {
@@ -24,6 +26,7 @@ fn main() {
 pub fn benchmark_smt() {
     let args = BenchmarkCmd::parse();
     let tree_size = args.size;
+    let mutations_size = args.mutations;
 
     // prepare the `leaves` vector for tree creation
     let mut entries = Vec::new();
@@ -35,7 +38,7 @@ pub fn benchmark_smt() {
 
     let mut tree = construction(entries, tree_size).unwrap();
     insertion(&mut tree, tree_size).unwrap();
-    batched_insertion(&mut tree, tree_size).unwrap();
+    batched_insertion(&mut tree, tree_size, mutations_size).unwrap();
     proof_generation(&mut tree, tree_size).unwrap();
 }
 
@@ -83,10 +86,10 @@ pub fn insertion(tree: &mut Smt, size: u64) -> Result<(), MerkleError> {
     Ok(())
 }
 
-pub fn batched_insertion(tree: &mut Smt, size: u64) -> Result<(), MerkleError> {
+pub fn batched_insertion(tree: &mut Smt, size: u64, mutations: u64) -> Result<(), MerkleError> {
     println!("Running a batched insertion benchmark:");
 
-    let new_pairs: Vec<(RpoDigest, Word)> = (0..1000)
+    let new_pairs: Vec<(RpoDigest, Word)> = (0..mutations)
         .map(|i| {
             let key = Rpo256::hash(&rand_value::<u64>().to_be_bytes());
             let value = [ONE, ONE, ONE, Felt::new(size + i)];
