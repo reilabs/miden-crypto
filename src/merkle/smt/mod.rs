@@ -278,50 +278,40 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
     ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
         use rayon::prelude::*;
 
-        let kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
-
-        let mut updates_by_leaf: BTreeMap<NodeIndex, Vec<(Self::Key, Self::Value)>> =
-            BTreeMap::new();
-
         // Group updates by leaf index
-        for (key, value) in kv_pairs {
-            let leaf_idx = Self::key_to_leaf_index(&key);
-            let node_index = NodeIndex::from(leaf_idx);
-            updates_by_leaf
-                .entry(node_index)
-                .or_insert_with(|| Vec::with_capacity(2))
-                .push((key, value));
-        }
+        let updates_by_leaf: BTreeMap<NodeIndex, Vec<(Self::Key, Self::Value)>> = kv_pairs
+            .into_iter()
+            .map(|(key, value)| (NodeIndex::from(Self::key_to_leaf_index(&key)), (key, value)))
+            .fold(BTreeMap::new(), |mut map, (node_index, kv)| {
+                map.entry(node_index).or_default().push(kv);
+                map
+            });
 
-        // Process leaves in parallel with pre-allocated vectors
-        let leaves_data: Vec<(NodeIndex, RpoDigest, BTreeMap<Self::Key, Self::Value>)> =
-            updates_by_leaf
-                .into_par_iter()
-                .map(|(leaf_idx, updates)| {
-                    let (first_key, _) = &updates[0];
-                    let leaf = self.get_leaf(first_key);
+        // Process leaves in parallel
+        let (leaf_hash_map, new_pairs): (BTreeMap<_, _>, BTreeMap<_, _>) = updates_by_leaf
+            .into_par_iter()
+            .map(|(leaf_idx, updates)| {
+                let (first_key, _) = &updates[0];
+                let leaf = self.get_leaf(first_key);
 
-                    let leaf_kv_map = updates.iter().fold(leaf, |mut acc_leaf, (key, value)| {
-                        acc_leaf = self.construct_prospective_leaf(acc_leaf, key, value);
-                        acc_leaf
-                    });
+                let leaf_kv_map = updates.iter().fold(leaf, |mut acc_leaf, (key, value)| {
+                    acc_leaf = self.construct_prospective_leaf(acc_leaf, key, value);
+                    acc_leaf
+                });
 
-                    let final_leaf_hash = Self::hash_leaf(&leaf_kv_map);
-                    let leaf_kv_map = BTreeMap::from_iter(updates);
+                let final_leaf_hash = Self::hash_leaf(&leaf_kv_map);
+                (BTreeMap::from_iter([(leaf_idx, final_leaf_hash)]), BTreeMap::from_iter(updates))
+            })
+            .reduce(
+                || (BTreeMap::new(), BTreeMap::new()),
+                |(mut hashes1, mut pairs1), (hashes2, pairs2)| {
+                    hashes1.extend(hashes2);
+                    pairs1.extend(pairs2);
+                    (hashes1, pairs1)
+                },
+            );
 
-                    (leaf_idx, final_leaf_hash, leaf_kv_map)
-                })
-                .collect();
-
-        let mut leaf_hash_map = BTreeMap::new();
-        let mut new_pairs = BTreeMap::new();
         let mut node_mutations = BTreeMap::new();
-
-        for (leaf_idx, final_hash, final_map) in leaves_data {
-            leaf_hash_map.insert(leaf_idx, final_hash);
-            new_pairs.extend(final_map);
-        }
-
         let mut current_level_hashes = leaf_hash_map;
         let mut new_root = self.root();
 
@@ -361,6 +351,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
         node_depth: u8,
     ) -> Vec<(NodeIndex, RpoDigest, NodeMutation)> {
         use alloc::vec::Vec;
+
         use rayon::prelude::*;
 
         // Pre-calculate parent indexes and its children
@@ -369,36 +360,18 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
             let mut parent_idx = child_idx;
             parent_idx.move_up();
 
-            by_parent.entry(parent_idx).or_insert(Vec::with_capacity(2)).push((child_idx, child_hash));
+            by_parent
+                .entry(parent_idx)
+                .or_insert(Vec::with_capacity(2))
+                .push((child_idx, child_hash));
         }
 
         // Process parents in parallel with optimal chunk size
         by_parent
             .into_par_iter()
             .map(|(parent_idx, children)| {
-                let parent_node = self.get_inner_node(parent_idx);
-                let mut left = parent_node.left;
-                let mut right = parent_node.right;
-
-                // Update left/right based on children
-                for (child_idx, child_hash) in children {
-                    if child_idx.is_value_odd() {
-                        right = child_hash;
-                    } else {
-                        left = child_hash;
-                    }
-                }
-
-                let new_node = InnerNode { left, right };
-                let new_hash = new_node.hash();
-
-                let &equiv_empty_hash = EmptySubtreeRoots::entry(DEPTH, node_depth);
-                let new_entry = if new_hash == equiv_empty_hash {
-                    NodeMutation::Removal
-                } else {
-                    NodeMutation::Addition(new_node)
-                };
-
+                let (new_hash, new_entry) =
+                    self.compute_inner_node_mutation(parent_idx, &children, node_depth);
                 (parent_idx, new_hash, new_entry)
             })
             .collect()
@@ -633,6 +606,55 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
             debug_assert!(!leaf_subtrees.is_empty());
         }
         (accumulated_nodes, initial_leaves)
+    }
+
+    /// Computes an inner node mutation based on updated child nodes
+    ///
+    /// Given an inner node index and its updated children, this function:
+    /// 1. Retrieves the current state of the inner node
+    /// 2. Updates its left/right children based on the provided child hashes
+    /// 3. Computes the new hash of the resulting node
+    /// 4. Determines if the node should be removed (if it matches empty subtree) or added
+    ///
+    /// # Arguments
+    /// * `node_index` - Index of the inner node to update
+    /// * `children` - Slice of (child_index, child_hash) pairs to incorporate
+    /// * `node_depth` - Depth of the node in the tree (used for empty subtree comparison)
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// * The new hash of node
+    /// * The mutation to apply (either Addition with new node or Removal)
+    fn compute_inner_node_mutation(
+        &self,
+        node_index: NodeIndex,
+        children: &[(NodeIndex, RpoDigest)],
+        node_depth: u8,
+    ) -> (RpoDigest, NodeMutation) {
+        let inner_node = self.get_inner_node(node_index);
+        let mut left = inner_node.left;
+        let mut right = inner_node.right;
+
+        // Update left/right based on children
+        for (child_idx, child_hash) in children {
+            if child_idx.is_value_odd() {
+                right = *child_hash;
+            } else {
+                left = *child_hash;
+            }
+        }
+
+        let new_node = InnerNode { left, right };
+        let new_hash = new_node.hash();
+
+        let &equiv_empty_hash = EmptySubtreeRoots::entry(DEPTH, node_depth);
+        let new_entry = if new_hash == equiv_empty_hash {
+            NodeMutation::Removal
+        } else {
+            NodeMutation::Addition(new_node)
+        };
+
+        (new_hash, new_entry)
     }
 }
 
