@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::mem;
 
 use num::Integer;
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex};
 use crate::{
@@ -43,7 +44,7 @@ pub const SMT_MAX_DEPTH: u8 = 64;
 /// Every key maps to one leaf. If there are as many keys as there are leaves, then
 /// [Self::Leaf] should be the same type as [Self::Value], as is the case with
 /// [crate::merkle::SimpleSmt]. However, if there are more keys than leaves, then [`Self::Leaf`]
-/// must accomodate all keys that map to the same leaf.
+/// must accommodate all keys that map to the same leaf.
 ///
 /// [SparseMerkleTree] currently doesn't support optimizations that compress Merkle proofs.
 pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
@@ -147,9 +148,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
             node_hash = Rpo256::merge(&[left, right]);
 
             if node_hash == *EmptySubtreeRoots::entry(DEPTH, node_depth) {
-                // If a subtree is empty, when can remove the inner node, since it's equal to the
+                // If a subtree is empty, then can remove the inner node, since it's equal to the
                 // default value
-                self.remove_inner_node(index)
+                self.remove_inner_node(index);
             } else {
                 self.insert_inner_node(index, InnerNode { left, right });
             }
@@ -320,11 +321,10 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
             let next_level_pairs =
                 self.rebuild_level_in_parallel(&current_level_hashes, node_depth);
 
-            let mut next_level_hashes = BTreeMap::new();
-            for (parent_idx, new_hash, new_entry) in next_level_pairs {
-                node_mutations.insert(parent_idx, new_entry);
-                next_level_hashes.insert(parent_idx, new_hash);
-            }
+            let next_level_hashes =
+                next_level_pairs.iter().map(|(idx, hash, _)| (*idx, *hash)).collect();
+
+            node_mutations.extend(next_level_pairs.into_iter().map(|(idx, _, entry)| (idx, entry)));
 
             current_level_hashes = next_level_hashes;
 
@@ -350,8 +350,6 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
         child_hashes: &BTreeMap<NodeIndex, RpoDigest>,
         node_depth: u8,
     ) -> Vec<(NodeIndex, RpoDigest, NodeMutation)> {
-        use alloc::vec::Vec;
-
         use rayon::prelude::*;
 
         // Pre-calculate parent indexes and its children
@@ -366,18 +364,22 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
                 .push((child_idx, child_hash));
         }
 
-        // Process parents in parallel with optimal chunk size
+        // Process parents in parallel
         by_parent
             .into_par_iter()
             .map(|(parent_idx, children)| {
-                let (new_hash, new_entry) =
-                    self.compute_inner_node_mutation(parent_idx, &children, node_depth);
+                let (new_hash, new_entry) = compute_inner_node_mutation(
+                    self.get_inner_node(parent_idx),
+                    &children,
+                    node_depth,
+                    DEPTH,
+                );
                 (parent_idx, new_hash, new_entry)
             })
             .collect()
     }
 
-    /// Apply the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
+    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
     /// this tree.
     ///
     /// # Errors
@@ -411,8 +413,12 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
 
         for (index, mutation) in node_mutations {
             match mutation {
-                Removal => self.remove_inner_node(index),
-                Addition(node) => self.insert_inner_node(index, node),
+                Removal => {
+                    self.remove_inner_node(index);
+                },
+                Addition(node) => {
+                    self.insert_inner_node(index, node);
+                },
             }
         }
 
@@ -423,6 +429,76 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
         self.set_root(new_root);
 
         Ok(())
+    }
+
+    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
+    /// this tree and returns the reverse mutation set. Applying the reverse mutation sets to the
+    /// updated tree will revert the changes.
+    ///
+    /// # Errors
+    /// If `mutations` was computed on a tree with a different root than this one, returns
+    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
+    /// the `mutations` were computed against, and the second item is the actual current root of
+    /// this tree.
+    fn apply_mutations_with_reversion(
+        &mut self,
+        mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
+    ) -> Result<MutationSet<DEPTH, Self::Key, Self::Value>, MerkleError>
+    where
+        Self: Sized,
+    {
+        use NodeMutation::*;
+        let MutationSet {
+            old_root,
+            node_mutations,
+            new_pairs,
+            new_root,
+        } = mutations;
+
+        // Guard against accidentally trying to apply mutations that were computed against a
+        // different tree, including a stale version of this tree.
+        if old_root != self.root() {
+            return Err(MerkleError::ConflictingRoots {
+                expected_root: self.root(),
+                actual_root: old_root,
+            });
+        }
+
+        let mut reverse_mutations = BTreeMap::new();
+        for (index, mutation) in node_mutations {
+            match mutation {
+                Removal => {
+                    if let Some(node) = self.remove_inner_node(index) {
+                        reverse_mutations.insert(index, Addition(node));
+                    }
+                },
+                Addition(node) => {
+                    if let Some(old_node) = self.insert_inner_node(index, node) {
+                        reverse_mutations.insert(index, Addition(old_node));
+                    } else {
+                        reverse_mutations.insert(index, Removal);
+                    }
+                },
+            }
+        }
+
+        let mut reverse_pairs = BTreeMap::new();
+        for (key, value) in new_pairs {
+            if let Some(old_value) = self.insert_value(key.clone(), value) {
+                reverse_pairs.insert(key, old_value);
+            } else {
+                reverse_pairs.insert(key, Self::EMPTY_VALUE);
+            }
+        }
+
+        self.set_root(new_root);
+
+        Ok(MutationSet {
+            old_root: new_root,
+            node_mutations: reverse_mutations,
+            new_pairs: reverse_pairs,
+            new_root: old_root,
+        })
     }
 
     // REQUIRED METHODS
@@ -448,10 +524,10 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
     fn get_inner_node(&self, index: NodeIndex) -> InnerNode;
 
     /// Inserts an inner node at the given index
-    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode);
+    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode>;
 
     /// Removes an inner node at the given index
-    fn remove_inner_node(&mut self, index: NodeIndex);
+    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode>;
 
     /// Inserts a leaf node, and returns the value at the key if already exists
     fn insert_value(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value>;
@@ -607,55 +683,6 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: Sync {
         }
         (accumulated_nodes, initial_leaves)
     }
-
-    /// Computes an inner node mutation based on updated child nodes
-    ///
-    /// Given an inner node index and its updated children, this function:
-    /// 1. Retrieves the current state of the inner node
-    /// 2. Updates its left/right children based on the provided child hashes
-    /// 3. Computes the new hash of the resulting node
-    /// 4. Determines if the node should be removed (if it matches empty subtree) or added
-    ///
-    /// # Arguments
-    /// * `node_index` - Index of the inner node to update
-    /// * `children` - Slice of (child_index, child_hash) pairs to incorporate
-    /// * `node_depth` - Depth of the node in the tree (used for empty subtree comparison)
-    ///
-    /// # Returns
-    /// A tuple containing:
-    /// * The new hash of node
-    /// * The mutation to apply (either Addition with new node or Removal)
-    fn compute_inner_node_mutation(
-        &self,
-        node_index: NodeIndex,
-        children: &[(NodeIndex, RpoDigest)],
-        node_depth: u8,
-    ) -> (RpoDigest, NodeMutation) {
-        let inner_node = self.get_inner_node(node_index);
-        let mut left = inner_node.left;
-        let mut right = inner_node.right;
-
-        // Update left/right based on children
-        for (child_idx, child_hash) in children {
-            if child_idx.is_value_odd() {
-                right = *child_hash;
-            } else {
-                left = *child_hash;
-            }
-        }
-
-        let new_node = InnerNode { left, right };
-        let new_hash = new_node.hash();
-
-        let &equiv_empty_hash = EmptySubtreeRoots::entry(DEPTH, node_depth);
-        let new_entry = if new_hash == equiv_empty_hash {
-            NodeMutation::Removal
-        } else {
-            NodeMutation::Addition(new_node)
-        };
-
-        (new_hash, new_entry)
-    }
 }
 
 // INNER NODE
@@ -737,7 +764,7 @@ impl<const DEPTH: u8> TryFrom<NodeIndex> for LeafIndex<DEPTH> {
 /// [`MutationSet`] stores this type in relation to a [`NodeIndex`] to keep track of what changes
 /// need to occur at which node indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NodeMutation {
+pub enum NodeMutation {
     /// Corresponds to [`SparseMerkleTree::remove_inner_node()`].
     Removal,
     /// Corresponds to [`SparseMerkleTree::insert_inner_node()`].
@@ -770,10 +797,95 @@ pub struct MutationSet<const DEPTH: u8, K, V> {
 }
 
 impl<const DEPTH: u8, K, V> MutationSet<DEPTH, K, V> {
-    /// Queries the root that was calculated during `SparseMerkleTree::compute_mutations()`. See
+    /// Returns the SMT root that was calculated during `SparseMerkleTree::compute_mutations()`. See
     /// that method for more information.
     pub fn root(&self) -> RpoDigest {
         self.new_root
+    }
+
+    /// Returns the SMT root before the mutations were applied.
+    pub fn old_root(&self) -> RpoDigest {
+        self.old_root
+    }
+
+    /// Returns the set of inner nodes that need to be removed or added.
+    pub fn node_mutations(&self) -> &BTreeMap<NodeIndex, NodeMutation> {
+        &self.node_mutations
+    }
+
+    /// Returns the set of top-level key-value pairs that need to be added, updated or deleted
+    /// (i.e. set to `EMPTY_WORD`).
+    pub fn new_pairs(&self) -> &BTreeMap<K, V> {
+        &self.new_pairs
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for InnerNode {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.left.write_into(target);
+        self.right.write_into(target);
+    }
+}
+
+impl Deserializable for InnerNode {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let left = source.read()?;
+        let right = source.read()?;
+
+        Ok(Self { left, right })
+    }
+}
+
+impl Serializable for NodeMutation {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            NodeMutation::Removal => target.write_bool(false),
+            NodeMutation::Addition(inner_node) => {
+                target.write_bool(true);
+                inner_node.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for NodeMutation {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_bool()? {
+            let inner_node = source.read()?;
+            return Ok(NodeMutation::Addition(inner_node));
+        }
+
+        Ok(NodeMutation::Removal)
+    }
+}
+
+impl<const DEPTH: u8, K: Serializable, V: Serializable> Serializable for MutationSet<DEPTH, K, V> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write(self.old_root);
+        target.write(self.new_root);
+        self.node_mutations.write_into(target);
+        self.new_pairs.write_into(target);
+    }
+}
+
+impl<const DEPTH: u8, K: Deserializable + Ord, V: Deserializable> Deserializable
+    for MutationSet<DEPTH, K, V>
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let old_root = source.read()?;
+        let new_root = source.read()?;
+        let node_mutations = source.read()?;
+        let new_pairs = source.read()?;
+
+        Ok(Self {
+            old_root,
+            node_mutations,
+            new_pairs,
+            new_root,
+        })
     }
 }
 
@@ -955,6 +1067,51 @@ fn build_subtree(
     debug_assert_eq!(leaves.len(), 1);
     let root = leaves.pop().unwrap();
     (inner_nodes, root)
+}
+
+/// Computes an inner node mutation based on updated child nodes
+///
+/// Given an inner node index and its updated children, this function:
+/// 1. Retrieves the current state of the inner node
+/// 2. Updates its left/right children based on the provided child hashes
+/// 3. Computes the new hash of the resulting node
+/// 4. Determines if the node should be removed (if it matches empty subtree) or added
+///
+/// # Arguments
+/// * `node_index` - Index of the inner node to update
+/// * `children` - Slice of (child_index, child_hash) pairs to incorporate
+/// * `node_depth` - Depth of the node in the tree (used for empty subtree comparison)
+///
+/// # Returns
+/// A tuple containing:
+/// * The new hash of node
+/// * The mutation to apply (either Addition with new node or Removal)
+#[cfg(feature = "concurrent")]
+fn compute_inner_node_mutation(
+    inner_node: InnerNode,
+    children: &[(NodeIndex, RpoDigest)],
+    node_depth: u8,
+    tree_depth: u8,
+) -> (RpoDigest, NodeMutation) {
+    let mut left = inner_node.left;
+    let mut right = inner_node.right;
+    // Update left/right based on children
+    for (child_idx, child_hash) in children {
+        if child_idx.is_value_odd() {
+            right = *child_hash;
+        } else {
+            left = *child_hash;
+        }
+    }
+    let new_node = InnerNode { left, right };
+    let new_hash = new_node.hash();
+    let &equiv_empty_hash = EmptySubtreeRoots::entry(tree_depth, node_depth);
+    let new_entry = if new_hash == equiv_empty_hash {
+        NodeMutation::Removal
+    } else {
+        NodeMutation::Addition(new_node)
+    };
+    (new_hash, new_entry)
 }
 
 #[cfg(feature = "internal")]
