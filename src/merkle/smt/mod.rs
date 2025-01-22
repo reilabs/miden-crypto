@@ -63,7 +63,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// The type for a value
     type Value: Clone + PartialEq;
     /// The type for a leaf
-    type Leaf: Clone;
+    type Leaf: Clone + Send + Sync;
     /// The type for an opening (i.e. a "proof") of a leaf
     type Opening;
 
@@ -531,6 +531,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
 
     /// Computes leaves from a set of key-value pairs and current leaf values.
     /// Derived from `sorted_pairs_to_leaves`
+    #[cfg(feature = "concurrent")]
     fn sorted_pairs_to_mutated_subtree_leaves(
         &self,
         pairs: Vec<(Self::Key, Self::Value)>,
@@ -676,6 +677,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// # Panics
     /// With debug assertions on, this function panics if it detects that `pairs` is not correctly
     /// sorted. Without debug assertions, the returned computations will be incorrect.
+    #[cfg(feature = "concurrent")]
     fn sorted_pairs_to_leaves(
         pairs: Vec<(Self::Key, Self::Value)>,
     ) -> PairComputations<u64, Self::Leaf> {
@@ -705,6 +707,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     ///
     /// # Panics
     /// This function will panic in debug mode if the input `pairs` are not sorted by column index.
+    #[cfg(feature = "concurrent")]
     fn process_sorted_pairs_to_leaves<F>(
         pairs: Vec<(Self::Key, Self::Value)>,
         mut process_leaf: F,
@@ -712,10 +715,10 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     where
         F: FnMut(Vec<(Self::Key, Self::Value)>) -> Self::Leaf,
     {
+        use rayon::prelude::*;
         debug_assert!(pairs.is_sorted_by_key(|(key, _)| Self::key_to_leaf_index(key).value()));
 
         let mut accumulator: PairComputations<u64, Self::Leaf> = Default::default();
-        let mut accumulated_leaves: Vec<SubtreeLeaf> = Vec::with_capacity(pairs.len() / 2);
 
         // As we iterate, we'll keep track of the kv-pairs we've seen so far that correspond to a
         // single leaf. When we see a pair that's in a different leaf, we'll swap these pairs
@@ -744,13 +747,19 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
             // it's time to swap out our buffer.
             let leaf_pairs = mem::take(&mut current_leaf_buffer);
             let leaf = process_leaf(leaf_pairs);
-            let hash = Self::hash_leaf(&leaf);
 
             accumulator.nodes.insert(col, leaf);
-            accumulated_leaves.push(SubtreeLeaf { col, hash });
 
             debug_assert!(current_leaf_buffer.is_empty());
         }
+
+        // Compute the leaves from the nodes concurrently
+        let mut accumulated_leaves: Vec<SubtreeLeaf> = accumulator.nodes.clone().into_par_iter().map(|(col, leaf)| {
+            SubtreeLeaf { col, hash: Self::hash_leaf(&leaf) }
+        }).collect();
+
+        // Sort the leaves by column
+        accumulated_leaves.sort_by_key(|leaf| leaf.col);
 
         // TODO: determine is there is any notable performance difference between computing
         // subtree boundaries after the fact as an iterator adapter (like this), versus computing

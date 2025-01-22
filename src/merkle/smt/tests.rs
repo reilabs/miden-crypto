@@ -23,6 +23,7 @@ fn smtleaf_to_subtree_leaf(leaf: &SmtLeaf) -> SubtreeLeaf {
 }
 
 #[test]
+#[cfg(feature = "concurrent")]
 fn test_sorted_pairs_to_leaves() {
     let entries: Vec<(RpoDigest, Word)> = vec![
         // Subtree 0.
@@ -148,6 +149,7 @@ fn generate_updates(entries: Vec<(RpoDigest, Word)>, updates: usize) -> Vec<(Rpo
 }
 
 #[test]
+#[cfg(feature = "concurrent")]
 fn test_single_subtree() {
     // A single subtree's worth of leaves.
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE;
@@ -187,6 +189,7 @@ fn test_single_subtree() {
 // subtree into computing another. In other words, test that `build_subtree()` is correctly
 // composable.
 #[test]
+#[cfg(feature = "concurrent")]
 fn test_two_subtrees() {
     // Two subtrees' worth of leaves.
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 2;
@@ -244,6 +247,7 @@ fn test_two_subtrees() {
 }
 
 #[test]
+#[cfg(feature = "concurrent")]
 fn test_singlethreaded_subtrees() {
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 64;
 
@@ -455,6 +459,7 @@ fn test_with_entries_parallel() {
 }
 
 #[test]
+#[cfg(feature = "concurrent")]
 fn test_singlethreaded_subtree_mutations() {
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 64;
 
