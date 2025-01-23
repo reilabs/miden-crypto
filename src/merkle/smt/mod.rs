@@ -754,9 +754,12 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
         }
 
         // Compute the leaves from the nodes concurrently
-        let mut accumulated_leaves: Vec<SubtreeLeaf> = accumulator.nodes.clone().into_par_iter().map(|(col, leaf)| {
-            SubtreeLeaf { col, hash: Self::hash_leaf(&leaf) }
-        }).collect();
+        let mut accumulated_leaves: Vec<SubtreeLeaf> = accumulator
+            .nodes
+            .clone()
+            .into_par_iter()
+            .map(|(col, leaf)| SubtreeLeaf { col, hash: Self::hash_leaf(&leaf) })
+            .collect();
 
         // Sort the leaves by column
         accumulated_leaves.sort_by_key(|leaf| leaf.col);
