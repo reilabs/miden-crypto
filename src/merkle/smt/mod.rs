@@ -81,6 +81,8 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     fn with_entries_par(entries: Vec<(Self::Key, Self::Value)>) -> Result<Self, MerkleError>
     where
         Self: Sized,
+        Self::Key: Send + Sync,
+        Self::Value: Send + Sync,
     {
         let (inner_nodes, leaves) = Self::build_subtrees(entries);
         let root = inner_nodes.get(&NodeIndex::root()).unwrap().hash();
@@ -766,7 +768,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
             .collect();
 
         // Sort the leaves by column
-        accumulated_leaves.sort_by_key(|leaf| leaf.col);
+        accumulated_leaves.par_sort_by_key(|leaf| leaf.col);
 
         // TODO: determine is there is any notable performance difference between computing
         // subtree boundaries after the fact as an iterator adapter (like this), versus computing
@@ -782,8 +784,14 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     #[cfg(feature = "concurrent")]
     fn build_subtrees(
         mut entries: Vec<(Self::Key, Self::Value)>,
-    ) -> (InnerNodes, Leaves<Self::Leaf>) {
-        entries.sort_by_key(|item| {
+    ) -> (InnerNodes, Leaves<Self::Leaf>) 
+    where
+        Self::Key: Send + Sync,
+        Self::Value: Send + Sync,
+    {
+        use rayon::prelude::*;
+
+        entries.par_sort_by_key(|item| {
             let index = Self::key_to_leaf_index(&item.0);
             index.value()
         });
