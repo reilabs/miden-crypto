@@ -1,4 +1,6 @@
-# Miden VM Hash Functions
+# Benchmarks
+
+## Hash Functions
 In the Miden VM, we make use of different hash functions. Some of these are "traditional" hash functions, like `BLAKE3`, which are optimized for out-of-STARK performance, while others are algebraic hash functions, like `Rescue Prime`, and are more optimized for a better performance inside the STARK. In what follows, we benchmark several such hash functions and compare against other constructions that are used by other proving systems. More precisely, we benchmark:
 
 * **BLAKE3** as specified [here](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and implemented [here](https://github.com/BLAKE3-team/BLAKE3) (with a wrapper exposed via this crate).
@@ -8,13 +10,11 @@ In the Miden VM, we make use of different hash functions. Some of these are "tra
 * **Rescue Prime Optimized (RPO)** as specified [here](https://eprint.iacr.org/2022/1577) and implemented in this crate.
 * **Rescue Prime Extended (RPX)** a variant of the [xHash](https://eprint.iacr.org/2023/1045) hash function as implemented in this crate.
 
-## Comparison and Instructions
-
 ### Comparison
 We benchmark the above hash functions using two scenarios. The first is a 2-to-1 $(a,b)\mapsto h(a,b)$ hashing where both $a$, $b$ and $h(a,b)$ are the digests corresponding to each of the hash functions.
 The second scenario is that of sequential hashing where we take a sequence of length $100$ field elements and hash these to produce a single digest. The digests are $4$ field elements in a prime field with modulus $2^{64} - 2^{32} + 1$ (i.e., 32 bytes) for Poseidon, Rescue Prime and RPO, and an array `[u8; 32]` for SHA3 and BLAKE3.
 
-#### Scenario 1: 2-to-1 hashing `h(a,b)`
+### Scenario 1: 2-to-1 hashing `h(a,b)`
 
 | Function            | BLAKE3 | SHA3    | Poseidon  | Rp64_256  | RPO_256 | RPX_256 |
 | ------------------- | ------ | ------- | --------- | --------- | ------- | ------- |
@@ -27,7 +27,7 @@ The second scenario is that of sequential hashing where we take a sequence of le
 | Intel Core i5-8279U | 68 ns  | 536 ns  |  2.0 µs   |  13.6 µs  | 8.5 µs  | 4.4 µs  |
 | Intel Xeon 8375C    | 67 ns  |         |           |           | 8.2 µs  |         |
 
-#### Scenario 2: Sequential hashing of 100 elements `h([a_0,...,a_99])`
+### Scenario 2: Sequential hashing of 100 elements `h([a_0,...,a_99])`
 
 | Function            | BLAKE3 | SHA3    | Poseidon  | Rp64_256  | RPO_256 | RPX_256 |
 | ------------------- | -------| ------- | --------- | --------- | ------- | ------- |
@@ -44,21 +44,21 @@ Notes:
 - On Graviton 3 and 4, RPO256 and RPX256 are run with SVE acceleration enabled.
 - On AMD EPYC 9R14, RPO256 and RPX256 are run with AVX2 acceleration enabled.
 
-### Data Structure Benchmarks
+## Sparse Merkle Tree
 We build cryptographic data structures incorporating these hash functions.
 What follows are benchmarks of operations on sparse Merkle trees (SMTs) which use the above `RPO_256` hash function.
 We perform a batched modification of 1,000 values in a tree with 1,000,000 leaves (with the `smt_hashmaps` feature to use the `hashbrown` crate).
 
 Times are given as a per-operation average.
 
-#### Scenario 1: SMT Batched Insertion
+### Scenario 1: SMT Batched Insertion
 
 | Function          | Sequential | Concurrent |
 | ----------------- | ---------- | ---------- |
 | AMD Ryzen 9 7950X | 205 µs     |  19 µs     |
 | Apple M1 Air      | 785 µs     | 450 µs     |
 
-#### Scenario 2: SMT Batched Update
+### Scenario 2: SMT Batched Update
 
 | Function          | Sequential | Concurrent |
 | ----------------- | ---------- | ---------- |
@@ -68,7 +68,7 @@ Times are given as a per-operation average.
 Notes:
 - On AMD Ryzen 9 7950X, benchmarks are run with AVX2 acceleration enabled.
 
-### Instructions
+## Instructions
 Before you can run the benchmarks, you'll need to make sure you have Rust [installed](https://www.rust-lang.org/tools/install). After that, to run the benchmarks for RPO and BLAKE3, clone the current repository, and from the root directory of the repo run the following:
 
  ```
