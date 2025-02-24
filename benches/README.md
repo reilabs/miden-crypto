@@ -49,21 +49,32 @@ We build cryptographic data structures incorporating these hash functions.
 What follows are benchmarks of operations on sparse Merkle trees (SMTs) which use the above `RPO_256` hash function.
 We perform a batched modification of 1,000 values in a tree with 1,000,000 leaves (with the `smt_hashmaps` feature to use the `hashbrown` crate).
 
-Times are given as a per-operation average.
+### Scenario 1: SMT Construction (1M pairs)
 
-### Scenario 1: SMT Batched Insertion
+| Hardware          | Sequential | Concurrent | Improvement |
+| ----------------- | ---------- | ---------- | ----------- |
+| AMD Ryzen 9 7950X | 196 sec    | 15 sec     |  13x        |
+| Apple M1 Air      | 352 sec    | 57 sec     | 6.2x        |
+| Apple M1 Pro      | 351 sec    | 37 sec     | 9.5x        |
+| Apple M4 Max      | 195 sec    | 15 sec     |  13x        |
 
-| Function          | Sequential | Concurrent |
-| ----------------- | ---------- | ---------- |
-| AMD Ryzen 9 7950X | 205 µs     |  19 µs     |
-| Apple M1 Air      | 785 µs     | 450 µs     |
+### Scenario 2: SMT Batched Insertion (1k pairs, 1M leaves)
 
-### Scenario 2: SMT Batched Update
+| Function          | Sequential | Concurrent | Improvement |
+| ----------------- | ---------- | ---------- | ----------- |
+| AMD Ryzen 9 7950X | 201 ms     | 19 ms      |  11x        |
+| Apple M1 Air      | 729 ms     | 406 ms     | 1.8x        |
+| Apple M1 Pro      | 623 ms     | 86 ms      | 7.2x        |
+| Apple M4 Max      | 212 ms     | 28 ms      | 7.6x        |
 
-| Function          | Sequential | Concurrent |
-| ----------------- | ---------- | ---------- |
-| AMD Ryzen 9 7950X | 208 µs     |  19 µs     |
-| Apple M1 Air      | 678 µs     | 304 µs     |
+### Scenario 3: SMT Batched Update (1k pairs, 1M leaves)
+
+| Function          | Sequential | Concurrent | Improvement |
+| ----------------- | ---------- | ---------- | ----------- |
+| AMD Ryzen 9 7950X | 202 ms     | 19 ms      |  11x        |
+| Apple M1 Air      | 691 ms     | 307 ms     | 2.3x        |
+| Apple M1 Pro      | 419 ms     | 56 ms      | 7.5x        |
+| Apple M4 Max      | 218 ms     | 24 ms      | 9.1x        |
 
 Notes:
 - On AMD Ryzen 9 7950X, benchmarks are run with AVX2 acceleration enabled.
