@@ -20,6 +20,9 @@ pub use merkle_tree::{path_to_text, tree_to_text, MerkleTree};
 mod path;
 pub use path::{MerklePath, RootPath, ValuePath};
 
+mod sparse_path;
+pub use sparse_path::SparseMerklePath;
+
 mod smt;
 #[cfg(feature = "internal")]
 pub use smt::{build_subtree_for_bench, SubtreeLeaf};
