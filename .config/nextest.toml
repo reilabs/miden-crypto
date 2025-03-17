@@ -1,3 +1,0 @@
-[profile.default]
-failure-output = "immediate-final"
-fail-fast = false
