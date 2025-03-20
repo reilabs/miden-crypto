@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 use core::iter;
 
 use super::{EmptySubtreeRoots, MerklePath, RpoDigest, SMT_MAX_DEPTH};
+use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// A different representation of [`MerklePath`] designed for memory efficiency for Merkle paths
 /// with empty nodes.
@@ -60,7 +61,8 @@ impl SparseMerklePath {
                 let &equivalent_empty_node = EmptySubtreeRoots::entry(tree_depth, depth);
                 nodes.push(equivalent_empty_node);
             } else {
-                nodes.push(sparse_nodes.next().unwrap());
+                let node = sparse_nodes.next().unwrap();
+                nodes.push(node);
             }
         }
 
@@ -75,7 +77,73 @@ impl SparseMerklePath {
     pub fn depth(&self) -> u8 {
         (self.nodes.len() + self.empty_nodes.count_ones() as usize) as u8
     }
+
+    pub fn get(&self, tree_depth: u8, node_depth: u8) -> RpoDigest {
+        let empty_bit = u64::checked_shl(1, node_depth as u32).unwrap();
+        let is_empty = (self.empty_nodes & empty_bit) != 0;
+        if is_empty {
+            *EmptySubtreeRoots::entry(tree_depth, node_depth)
+        } else {
+            // Get rid of 1s that are more significant than the one that indicates our empty bit.
+            let mask = u64::unbounded_shl(u64::MAX, node_depth as u32);
+            let empty_before = u64::count_ones(self.empty_nodes & mask);
+            std::dbg!(node_depth, empty_before);
+            //let index = node_depth - empty_before as u8;
+            let index = empty_before as u8 - node_depth;
+            self.nodes[index as usize]
+        }
+    }
 }
+
+// ITERATORS
+// ================================================================================================
+
+struct SparseMerkleIter {
+    path: SparseMerklePath,
+    current_depth: u8,
+    tree_depth: u8,
+}
+
+impl Iterator for SparseMerkleIter {
+    type Item = RpoDigest;
+
+    fn next(&mut self) -> Option<RpoDigest> {
+        todo!();
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len: usize = self.path.depth().into();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for SparseMerkleIter {
+    fn len(&self) -> usize {
+        self.path.depth().into()
+    }
+}
+
+impl DoubleEndedIterator for SparseMerkleIter {
+    fn next_back(&mut self) -> Option<RpoDigest> {
+        todo!();
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for SparseMerklePath {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        // TODO: if this is enforced in the constructor, then maybe this should be `debug_assert`?
+        assert!(self.depth() <= SMT_MAX_DEPTH, "Length enforced in the constructor");
+        target.write_u64(self.empty_nodes);
+        target.write_many(&self.nodes);
+    }
+}
+
+//impl Deserializable for SparseMerklePath {
+//    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {}
+//}
 
 #[cfg(test)]
 mod tests {
@@ -108,5 +176,10 @@ mod tests {
 
             assert_eq!(control_path, test_path);
         }
+    }
+
+    #[test]
+    fn get() {
+        todo!();
     }
 }
