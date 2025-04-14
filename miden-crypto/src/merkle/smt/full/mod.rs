@@ -16,7 +16,7 @@ pub use proof::SmtProof;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 mod large;
-pub use large::LargeSmt;
+pub use large::{LargeSmt, MemoryStorage, RocksDbStorage, SmtStorage};
 
 // Concurrent implementation
 #[cfg(feature = "concurrent")]

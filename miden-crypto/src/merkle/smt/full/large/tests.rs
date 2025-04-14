@@ -53,8 +53,13 @@ fn test_smt_and_large_smt_are_equivalent() {
     let smt = Smt::with_entries(entries.clone()).unwrap();
 
     let path = setup_db_path();
-    let large_smt = LargeSmt::with_entries(&path, entries).unwrap();
+    let large_smt = LargeSmt::with_entries(&path, entries.clone()).unwrap();
     assert_eq!(smt.root(), large_smt.root());
+
+    // check leaf openings are the same
+    for (key, value) in entries {
+        assert_eq!(smt.open(&key), large_smt.open(&key));
+    }
 }
 
 #[test]

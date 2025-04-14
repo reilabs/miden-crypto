@@ -1,10 +1,10 @@
-use std::{fs, path::Path, time::Instant};
+use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
     hash::rpo::{Rpo256, RpoDigest},
-    merkle::{LargeSmt, MerkleError},
+    merkle::{LargeSmt, RocksDbStorage, MerkleError},
 };
 use rand::{Rng, prelude::IteratorRandom, rng};
 use rand_utils::rand_value;
@@ -24,6 +24,10 @@ pub struct BenchmarkCmd {
 }
 
 fn main() {
+    rayon::ThreadPoolBuilder::new()
+    .num_threads(16)
+    .build_global()
+    .unwrap();
     benchmark_smt();
 }
 
@@ -51,17 +55,17 @@ pub fn benchmark_smt() {
 }
 
 /// Runs the construction benchmark for [`Smt`], returning the constructed tree.
-pub fn construction(entries: Vec<(RpoDigest, Word)>, size: usize) -> Result<LargeSmt, MerkleError> {
+pub fn construction(entries: Vec<(RpoDigest, Word)>, size: usize) -> Result<LargeSmt<RocksDbStorage>, MerkleError> {
     println!("Running a construction benchmark:");
     let now = Instant::now();
-    let path = Path::new("bench_large_smt");
+    let path = PathBuf::from("bench_large_smt");
     // delete the folder if it exists
     if path.exists() {
-        std::fs::remove_dir_all(path).unwrap();
+        std::fs::remove_dir_all(path.clone()).unwrap();
     }
-    fs::create_dir_all(path).expect("Failed to create database directory");
-
-    let tree = LargeSmt::with_entries(path, entries)?;
+    fs::create_dir_all(path.clone()).expect("Failed to create database directory");
+    let storage = RocksDbStorage::open(&path).expect("Failed to open database");
+    let tree = LargeSmt::with_entries(storage, entries)?;
     let elapsed = now.elapsed().as_secs_f32();
     println!("Constructed an SMT with {size} key-value pairs in {elapsed:.1} seconds");
     println!("Number of leaf nodes: {}\n", tree.num_leaves());
@@ -70,7 +74,7 @@ pub fn construction(entries: Vec<(RpoDigest, Word)>, size: usize) -> Result<Larg
 }
 
 /// Runs the insertion benchmark for the [`Smt`].
-pub fn insertion(tree: &mut LargeSmt, insertions: usize) -> Result<(), MerkleError> {
+pub fn insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize) -> Result<(), MerkleError> {
     println!("Running an insertion benchmark:");
 
     let size = tree.num_leaves();
@@ -95,7 +99,7 @@ pub fn insertion(tree: &mut LargeSmt, insertions: usize) -> Result<(), MerkleErr
     Ok(())
 }
 
-pub fn batched_insertion(tree: &mut LargeSmt, insertions: usize) -> Result<(), MerkleError> {
+pub fn batched_insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize) -> Result<(), MerkleError> {
     println!("Running a batched insertion benchmark:");
 
     let size = tree.num_leaves();
@@ -139,8 +143,8 @@ pub fn batched_insertion(tree: &mut LargeSmt, insertions: usize) -> Result<(), M
 }
 
 pub fn batched_update(
-    tree: &mut LargeSmt,
-    entries: Vec<(RpoDigest, Word)>,
+    tree: &mut LargeSmt<RocksDbStorage>,
+    entries: Vec<(RpoDigest, Word)>,    
     updates: usize,
 ) -> Result<(), MerkleError> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
@@ -198,7 +202,7 @@ pub fn batched_update(
 }
 
 /// Runs the proof generation benchmark for the [`Smt`].
-pub fn proof_generation(tree: &mut LargeSmt) -> Result<(), MerkleError> {
+pub fn proof_generation(tree: &mut LargeSmt<RocksDbStorage>) -> Result<(), MerkleError> {
     const NUM_PROOFS: usize = 100;
 
     println!("Running a proof generation benchmark:");
