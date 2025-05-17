@@ -1,10 +1,7 @@
 //! Data structures related to Merkle trees based on RPO256 hash function.
 use core::fmt::{self, Display};
 
-use super::{
-    EMPTY_WORD, Felt, Word, ZERO,
-    hash::rpo::{Rpo256, RpoDigest},
-};
+use super::{EMPTY_WORD, Felt, Word, ZERO, hash::rpo::Rpo256};
 
 // REEXPORTS
 // ================================================================================================
@@ -57,16 +54,11 @@ impl<const DEPTH: u8> Display for LeafIndex<DEPTH> {
 // ================================================================================================
 
 #[cfg(test)]
-const fn int_to_node(value: u64) -> RpoDigest {
-    RpoDigest::new([Felt::new(value), ZERO, ZERO, ZERO])
+const fn int_to_node(value: u64) -> Word {
+    Word::new([Felt::new(value), ZERO, ZERO, ZERO])
 }
 
 #[cfg(test)]
 const fn int_to_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO]
-}
-
-#[cfg(test)]
-fn digests_to_words(digests: &[RpoDigest]) -> alloc::vec::Vec<Word> {
-    digests.iter().map(|d| d.into()).collect()
+    Word::new([Felt::new(value), ZERO, ZERO, ZERO])
 }

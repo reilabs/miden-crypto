@@ -71,5 +71,5 @@ criterion_main!(smt_group);
 fn generate_word(seed: &mut [u8; 32]) -> Word {
     *seed = prng_array(*seed);
     let nums: [u64; 4] = prng_array(*seed);
-    [Felt::new(nums[0]), Felt::new(nums[1]), Felt::new(nums[2]), Felt::new(nums[3])]
+    Word::new([Felt::new(nums[0]), Felt::new(nums[1]), Felt::new(nums[2]), Felt::new(nums[3])])
 }
