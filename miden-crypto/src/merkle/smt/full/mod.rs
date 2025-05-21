@@ -99,6 +99,24 @@ impl Smt {
         }
     }
 
+    /// Similar to `with_entries` but avoids the overhead of sorting if the entries are already
+    /// sorted.
+    ///
+    /// This only applies if the "concurrent" feature is enabled. Without the feature, the behavior
+    /// is equivalent to `with_entiries`.
+    pub fn with_sorted_entries(
+        entries: impl IntoIterator<Item = (Word, Word)>,
+    ) -> Result<Self, MerkleError> {
+        #[cfg(feature = "concurrent")]
+        {
+            Self::with_sorted_entries_concurrent(entries)
+        }
+        #[cfg(not(feature = "concurrent"))]
+        {
+            Self::with_entries_sequential(entries)
+        }
+    }
+
     /// Returns a new [Smt] instantiated with leaves set as specified by the provided entries.
     ///
     /// This sequential implementation processes entries one at a time to build the tree.
@@ -539,12 +557,12 @@ fn test_smt_serialization_deserialization() {
     // Smt with values
     let smt_leaves_2: [(Word, Word); 2] = [
         (
-            Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
-            Word::new([Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)]),
+            Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
+            [Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)].into(),
         ),
         (
-            Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
-            Word::new([Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)]),
+            Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
+            [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)].into(),
         ),
     ];
     let smt = Smt::with_entries(smt_leaves_2).unwrap();
@@ -552,4 +570,24 @@ fn test_smt_serialization_deserialization() {
     let bytes = smt.to_bytes();
     assert_eq!(smt, Smt::read_from_bytes(&bytes).unwrap());
     assert_eq!(bytes.len(), smt.get_size_hint());
+}
+
+#[test]
+fn smt_with_sorted_entries() {
+    // Smt with sorted values
+    let smt_leaves_2: [(Word, Word); 2] = [
+        (
+            Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
+            [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)].into(),
+        ),
+        (
+            Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
+            [Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)].into(),
+        ),
+    ];
+
+    let smt = Smt::with_sorted_entries(smt_leaves_2).unwrap();
+    let expected_smt = Smt::with_entries(smt_leaves_2).unwrap();
+
+    assert_eq!(smt, expected_smt);
 }
