@@ -1,4 +1,4 @@
-## 0.15.0 (TBD)
+## 0.14.1 (2025-05-31)
 
 - Add missing `PartialSmt` APIs (#417).
 
