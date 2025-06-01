@@ -231,7 +231,7 @@ impl Smt {
     }
 
     /// Returns an iterator over the key-value pairs of this [Smt] in arbitrary order.
-    pub fn entries(&self) -> impl Iterator<Item = &(RpoDigest, Word)> {
+    pub fn entries(&self) -> impl Iterator<Item = &(Word, Word)> {
         self.leaves().flat_map(|(_, leaf)| leaf.entries())
     }
 

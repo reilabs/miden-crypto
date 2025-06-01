@@ -49,7 +49,6 @@ impl PartialSmt {
     {
         let mut partial_smt = Self::new();
 
-
         for (proof, leaf) in proofs.into_iter().map(SmtProof::into_parts) {
             partial_smt.add_path(leaf, proof)?;
         }
@@ -253,7 +252,7 @@ impl PartialSmt {
 
     /// Returns an iterator over the tracked, non-empty key-value pairs of the [`PartialSmt`] in
     /// arbitrary order.
-    pub fn entries(&self) -> impl Iterator<Item = &(RpoDigest, Word)> {
+    pub fn entries(&self) -> impl Iterator<Item = &(Word, Word)> {
         self.0.entries()
     }
 
@@ -467,13 +466,13 @@ mod tests {
     /// This test uses only non-empty values in the partial SMT.
     #[test]
     fn partial_smt_root_mismatch_on_non_empty_values() {
-        let key0 = Word::from(rand_array::<Felt, 4>());
-        let key1 = Word::from(rand_array::<Felt, 4>());
-        let key2 = Word::from(rand_array::<Felt, 4>());
+        let key0 = Word::new(rand_array());
+        let key1 = Word::new(rand_array());
+        let key2 = Word::new(rand_array());
 
-        let value0 = Word::from(rand_array::<Felt, 4>());
-        let value1 = Word::from(rand_array::<Felt, 4>());
-        let value2 = Word::from(rand_array::<Felt, 4>());
+        let value0 = Word::new(rand_array());
+        let value1 = Word::new(rand_array());
+        let value2 = Word::new(rand_array());
 
         let kv_pairs = vec![(key0, value0), (key1, value1)];
 
@@ -495,23 +494,23 @@ mod tests {
     /// Tests that a basic PartialSmt's iterator APIs return the expected values.
     #[test]
     fn partial_smt_iterator_apis() {
-        let key0 = RpoDigest::from(Word::from(rand_array()));
-        let key1 = RpoDigest::from(Word::from(rand_array()));
-        let key2 = RpoDigest::from(Word::from(rand_array()));
+        let key0 = Word::new(rand_array());
+        let key1 = Word::new(rand_array());
+        let key2 = Word::new(rand_array());
         // A key for which we won't add a value so it will be empty.
-        let key_empty = RpoDigest::from(Word::from(rand_array()));
+        let key_empty = Word::new(rand_array());
 
-        let value0 = Word::from(rand_array());
-        let value1 = Word::from(rand_array());
-        let value2 = Word::from(rand_array());
+        let value0 = Word::new(rand_array());
+        let value1 = Word::new(rand_array());
+        let value2 = Word::new(rand_array());
 
         let mut kv_pairs = vec![(key0, value0), (key1, value1), (key2, value2)];
 
         // Add more random leaves.
         kv_pairs.reserve(1000);
         for _ in 0..1000 {
-            let key = RpoDigest::from(Word::from(rand_array()));
-            let value = Word::from(rand_array());
+            let key = Word::new(rand_array());
+            let value = Word::new(rand_array());
             kv_pairs.push((key, value));
         }
 
@@ -574,7 +573,7 @@ mod tests {
         // ----------------------------------------------------------------------------------------
 
         let partial_inner_nodes: BTreeSet<_> =
-            partial.inner_nodes().map(|node| [node.left, node.right]).flatten().collect();
+            partial.inner_nodes().flat_map(|node| [node.left, node.right]).collect();
 
         for merkle_path in proofs.into_iter().map(|proof| proof.into_parts().0) {
             for (idx, digest) in merkle_path.into_iter().enumerate() {
