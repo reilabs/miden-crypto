@@ -1,13 +1,23 @@
-use std::{fs, path::PathBuf, time::Instant};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
+#[cfg(not(feature = "rocksdb"))]
+use miden_crypto::merkle::MemoryStorage;
+#[cfg(feature = "rocksdb")]
+use miden_crypto::merkle::RocksDbStorage;
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
     hash::rpo::{Rpo256, RpoDigest},
-    merkle::{LargeSmt, RocksDbStorage, MerkleError},
+    merkle::{LargeSmt, MerkleError},
 };
 use rand::{Rng, prelude::IteratorRandom, rng};
 use rand_utils::rand_value;
+
+#[cfg(feature = "rocksdb")]
+type Storage = RocksDbStorage;
+
+#[cfg(not(feature = "rocksdb"))]
+type Storage = MemoryStorage;
 
 #[derive(Parser, Debug)]
 #[clap(name = "Benchmark", about = "SMT benchmark", version, rename_all = "kebab-case")]
@@ -21,14 +31,17 @@ pub struct BenchmarkCmd {
     /// Number of updates
     #[clap(short = 'u', long = "updates", default_value = "10000")]
     updates: usize,
+    /// Path for the benchmark database
+    #[clap(short = 'p', long = "path")]
+    storage_path: Option<PathBuf>,
+    /// Open existing database and skip construction
+    #[clap(short = 'o', long = "open", default_value = "false")]
+    open: bool,
 }
 
 fn main() {
-    rayon::ThreadPoolBuilder::new()
-    .num_threads(16)
-    .build_global()
-    .unwrap();
     benchmark_smt();
+    println!("Benchmark completed successfully");
 }
 
 /// Run a benchmark for [`Smt`].
@@ -37,7 +50,13 @@ pub fn benchmark_smt() {
     let tree_size = args.size;
     let insertions = args.insertions;
     let updates = args.updates;
+    let storage_path = args.storage_path;
 
+    if cfg!(feature = "rocksdb") {
+        println!("Running benchmark with rocksdb storage");
+    } else {
+        println!("Running benchmark with memory storage");
+    }
     assert!(updates <= tree_size, "Cannot update more than `size`");
     // prepare the `leaves` vector for tree creation
     let mut entries = Vec::new();
@@ -47,24 +66,26 @@ pub fn benchmark_smt() {
         entries.push((key, value));
     }
 
-    let tree = construction(entries.clone(), tree_size).unwrap();
-    insertion(&mut tree.clone(), insertions).unwrap();
-    batched_insertion(&mut tree.clone(), insertions).unwrap();
-    batched_update(&mut tree.clone(), entries, updates).unwrap();
-    proof_generation(&mut tree.clone()).unwrap();
+    let mut tree = if args.open {
+        open_existing(storage_path).unwrap()
+    } else {
+        construction(entries.clone(), tree_size, storage_path).unwrap()
+    };
+    insertion(&mut tree, insertions).unwrap();
+    batched_insertion(&mut tree, insertions).unwrap();
+    batched_update(&mut tree, entries.clone(), updates).unwrap();
+    proof_generation(&mut tree).unwrap();
 }
 
 /// Runs the construction benchmark for [`Smt`], returning the constructed tree.
-pub fn construction(entries: Vec<(RpoDigest, Word)>, size: usize) -> Result<LargeSmt<RocksDbStorage>, MerkleError> {
+pub fn construction(
+    entries: Vec<(RpoDigest, Word)>,
+    size: usize,
+    database_path: Option<PathBuf>,
+) -> Result<LargeSmt<Storage>, MerkleError> {
     println!("Running a construction benchmark:");
     let now = Instant::now();
-    let path = PathBuf::from("bench_large_smt");
-    // delete the folder if it exists
-    if path.exists() {
-        std::fs::remove_dir_all(path.clone()).unwrap();
-    }
-    fs::create_dir_all(path.clone()).expect("Failed to create database directory");
-    let storage = RocksDbStorage::open(&path).expect("Failed to open database");
+    let storage = get_storage(database_path, false);
     let tree = LargeSmt::with_entries(storage, entries)?;
     let elapsed = now.elapsed().as_secs_f32();
     println!("Constructed an SMT with {size} key-value pairs in {elapsed:.1} seconds");
@@ -73,8 +94,17 @@ pub fn construction(entries: Vec<(RpoDigest, Word)>, size: usize) -> Result<Larg
     Ok(tree)
 }
 
+pub fn open_existing(storage_path: Option<PathBuf>) -> Result<LargeSmt<Storage>, MerkleError> {
+    println!("Opening an existing database:");
+    let now = Instant::now();
+    let storage = get_storage(storage_path, true);
+    let tree = LargeSmt::new(storage)?;
+    let elapsed = now.elapsed().as_secs_f32();
+    println!("Opened an existing database in {elapsed:.1} seconds");
+    Ok(tree)
+}
 /// Runs the insertion benchmark for the [`Smt`].
-pub fn insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize) -> Result<(), MerkleError> {
+pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), MerkleError> {
     println!("Running an insertion benchmark:");
 
     let size = tree.num_leaves();
@@ -99,7 +129,10 @@ pub fn insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize) -> Resu
     Ok(())
 }
 
-pub fn batched_insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize) -> Result<(), MerkleError> {
+pub fn batched_insertion(
+    tree: &mut LargeSmt<Storage>,
+    insertions: usize,
+) -> Result<(), MerkleError> {
     println!("Running a batched insertion benchmark:");
 
     let size = tree.num_leaves();
@@ -143,8 +176,8 @@ pub fn batched_insertion(tree: &mut LargeSmt<RocksDbStorage>, insertions: usize)
 }
 
 pub fn batched_update(
-    tree: &mut LargeSmt<RocksDbStorage>,
-    entries: Vec<(RpoDigest, Word)>,    
+    tree: &mut LargeSmt<Storage>,
+    entries: Vec<(RpoDigest, Word)>,
     updates: usize,
 ) -> Result<(), MerkleError> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
@@ -202,29 +235,52 @@ pub fn batched_update(
 }
 
 /// Runs the proof generation benchmark for the [`Smt`].
-pub fn proof_generation(tree: &mut LargeSmt<RocksDbStorage>) -> Result<(), MerkleError> {
+pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), MerkleError> {
     const NUM_PROOFS: usize = 100;
 
     println!("Running a proof generation benchmark:");
 
-    let mut insertion_times = Vec::new();
+    let mut opening_times = Vec::new();
     let size = tree.num_leaves();
 
-    for i in 0..NUM_PROOFS {
-        let test_key = Rpo256::hash(&rand_value::<u64>().to_be_bytes());
-        let test_value = [ONE, ONE, ONE, Felt::new((size + i) as u64)];
-        tree.insert(test_key, test_value);
+    // fetch keys already in the tree to be opened
+    let keys = tree
+        .leaves()
+        .take(NUM_PROOFS)
+        .map(|(_, leaf)| leaf.entries()[0].0)
+        .collect::<Vec<_>>();
 
+    for key in keys {
         let now = Instant::now();
-        let _proof = tree.open(&test_key);
-        insertion_times.push(now.elapsed().as_micros());
+        let _proof = tree.open(&key);
+        opening_times.push(now.elapsed().as_micros());
     }
 
     println!(
         "The average proving time measured by {NUM_PROOFS} value proofs in an SMT with {size} leaves in {:.0} μs",
         // calculate the average
-        insertion_times.iter().sum::<u128>() as f64 / (NUM_PROOFS as f64),
+        opening_times.iter().sum::<u128>() as f64 / (NUM_PROOFS as f64),
     );
 
     Ok(())
+}
+
+#[cfg(feature = "rocksdb")]
+fn get_storage(database_path: Option<PathBuf>, open: bool) -> Storage {
+    let path = database_path.unwrap_or_else(|| std::env::temp_dir().join("miden_crypto_benchmark"));
+    println!("Using database path: {}", path.display());
+    if !open {
+        // delete the folder if it exists as we are creating a new database
+        if path.exists() {
+            std::fs::remove_dir_all(path.clone()).unwrap();
+        }
+        std::fs::create_dir_all(path.clone()).expect("Failed to create database directory");
+    }
+    let storage = Storage::open(&path).expect("Failed to open database");
+    storage
+}
+
+#[cfg(not(feature = "rocksdb"))]
+fn get_storage(_database_path: Option<PathBuf>, _open: bool) -> Storage {
+    Storage::new()
 }

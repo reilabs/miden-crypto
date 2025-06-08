@@ -1,309 +1,667 @@
-use alloc::string::ToString;
-use alloc::vec::Vec;
-use rayon::prelude::*;
-use super::{SmtStorage, StorageError, StorageUpdates};
-use crate::merkle::{InnerNode, NodeIndex, RpoDigest, SmtLeaf};
-use crate::merkle::smt::full::large::{subtree::Subtree, IN_MEMORY_DEPTH};
-use crate::merkle::smt::UnorderedMap;
-use rocksdb::{BlockBasedOptions, Cache, ColumnFamilyDescriptor, DB, DBCompressionType, Options, WriteBatch};
-use std::path::PathBuf;
-use std::sync::Arc;
+use alloc::{boxed::Box, string::ToString, vec::Vec};
+use std::{path::PathBuf, sync::Arc};
+
+use rocksdb::{
+    BlockBasedOptions, Cache, ColumnFamilyDescriptor, DB, DBCompactionStyle, DBCompressionType,
+    DBIteratorWithThreadMode, IteratorMode, Options, ReadOptions, SliceTransform, WriteBatch,
+};
 use winter_utils::{Deserializable, Serializable};
 
-const LEAVES_CF: &str = "leaves";
-const SUBTREES_CF: &str = "subtrees";
-const UPPER_NODES_CF: &str = "upper_nodes";
-const METADATA_CF: &str = "metadata";
+use super::{SmtStorage, StorageError, StorageUpdates};
+use crate::{
+    EMPTY_WORD, Word,
+    merkle::{
+        InnerNode, NodeIndex, RpoDigest, SmtLeaf,
+        smt::{
+            UnorderedMap,
+            full::large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
+        },
+    },
+};
 
+/// The name of the RocksDB column family used for storing SMT leaves.
+const LEAVES_CF: &str = "leaves";
+/// The names of the RocksDB column families used for storing SMT subtrees (deep nodes).
+const SUBTREE_24_CF: &str = "st24";
+const SUBTREE_32_CF: &str = "st32";
+const SUBTREE_40_CF: &str = "st40";
+const SUBTREE_48_CF: &str = "st48";
+const SUBTREE_56_CF: &str = "st56";
+
+/// The name of the RocksDB column family used for storing metadata (e.g., root, counts).
+const METADATA_CF: &str = "metadata";
+/// The name of the RocksDB column family used for storing level 24 hashes for fast tree rebuilding.
+const DEPTH_24_CF: &str = "depth24";
+
+/// The key used in the `METADATA_CF` column family to store the SMT's root hash.
 const ROOT_KEY: &[u8] = b"smt_root";
+/// The key used in the `METADATA_CF` column family to store the total count of non-empty leaves.
 const LEAF_COUNT_KEY: &[u8] = b"leaf_count";
+/// The key used in the `METADATA_CF` column family to store the total count of key-value entries.
 const ENTRY_COUNT_KEY: &[u8] = b"entry_count";
 
-
+/// A RocksDB-backed persistent storage implementation for a Sparse Merkle Tree (SMT).
+///
+/// Implements the `SmtStorage` trait, providing durable storage for SMT components
+/// including leaves, subtrees (for deeper parts of the tree), and metadata like the SMT root
+/// and counts. It leverages RocksDB column families to organize data:
+/// - `LEAVES_CF` ("leaves"): Stores `SmtLeaf` data, keyed by their logical u64 index.
+/// - `SUBTREE_24_CF` ("st24"): Stores serialized `Subtree` data at depth 24, keyed by their root `NodeIndex`.
+/// - `SUBTREE_32_CF` ("st32"): Stores serialized `Subtree` data at depth 32, keyed by their root `NodeIndex`.
+/// - `SUBTREE_40_CF` ("st40"): Stores serialized `Subtree` data at depth 40, keyed by their root `NodeIndex`.
+/// - `SUBTREE_48_CF` ("st48"): Stores serialized `Subtree` data at depth 48, keyed by their root `NodeIndex`.
+/// - `SUBTREE_56_CF` ("st56"): Stores serialized `Subtree` data at depth 56, keyed by their root `NodeIndex`.
+/// - `METADATA_CF` ("metadata"): Stores overall SMT metadata such as the current root hash, total
+///   leaf count, and total entry count.
 #[derive(Debug, Clone)]
 pub struct RocksDbStorage {
     db: Arc<DB>,
 }
 
 impl RocksDbStorage {
+    /// Opens or creates a RocksDB database at the specified `path` and configures it for SMT
+    /// storage.
+    ///
+    /// This method sets up the necessary column families (`leaves`, `subtrees`, `metadata`)
+    /// and applies various RocksDB options for performance, such as caching, bloom filters,
+    /// and compaction strategies tailored for SMT workloads.
+    ///
+    /// # Errors
+    /// Returns `StorageError::BackendError` if the database cannot be opened or configured,
+    /// for example, due to path issues, permissions, or RocksDB internal errors.
     pub fn open(path: &PathBuf) -> Result<Self, StorageError> {
+        // Base DB options
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
         db_opts.increase_parallelism(rayon::current_num_threads() as i32);
-        db_opts.set_max_open_files(512);
+        db_opts.set_max_open_files(1024);
+        db_opts.set_max_background_jobs(rayon::current_num_threads() as i32);
 
-        let cache = Cache::new_lru_cache(1024 * 1024 * 1024);
+        // Share a 1 GiB LRU block cache
+        let cache = Cache::new_lru_cache(1 << 30);
 
-        let mut leaves_table_opts = BlockBasedOptions::default();
-        leaves_table_opts.set_block_cache(&cache);
+        // Common table options for bloom filtering and cache
+        let mut table_opts = BlockBasedOptions::default();
+        table_opts.set_block_cache(&cache);
+        table_opts.set_bloom_filter(10.0, false);
+        table_opts.set_whole_key_filtering(true);
+        table_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
+
+        // Column family for leaves
         let mut leaves_opts = Options::default();
-        leaves_opts.set_block_based_table_factory(&leaves_table_opts);
-        //leaves_opts.set_compression_type(DBCompressionType::Lz4);
+        leaves_opts.set_block_based_table_factory(&table_opts);
+        leaves_opts.set_write_buffer_size(256 << 20);
+        leaves_opts.set_max_write_buffer_number(6);
+        leaves_opts.set_min_write_buffer_number_to_merge(2);
+        leaves_opts.set_compaction_style(DBCompactionStyle::Level);
+        leaves_opts.set_target_file_size_base(64 << 20);
+        leaves_opts.set_compression_type(DBCompressionType::Lz4);
 
-        let mut subtrees_table_opts = BlockBasedOptions::default();
-        subtrees_table_opts.set_block_cache(&cache);
-        let mut subtrees_opts = Options::default();
-        subtrees_opts.set_block_based_table_factory(&subtrees_table_opts);
-        //subtrees_opts.set_compression_type(DBCompressionType::Lz4);
+        // Helper to build subtree CF options with correct prefix length
+        fn subtree_cf(cache: &Cache, prefix_bytes: usize) -> Options {
+            let mut tbl = BlockBasedOptions::default();
+            tbl.set_block_cache(cache);
+            tbl.set_bloom_filter(16.0, true);
+            tbl.set_whole_key_filtering(true);
+            tbl.set_pin_l0_filter_and_index_blocks_in_cache(true);
 
-        let mut upper_nodes_table_opts = BlockBasedOptions::default();
-        upper_nodes_table_opts.set_block_cache(&cache);
-        let mut upper_nodes_opts = Options::default();
-        upper_nodes_opts.set_block_based_table_factory(&upper_nodes_table_opts);
-        //upper_nodes_opts.set_compression_type(DBCompressionType::Lz4);
+            let mut opts = Options::default();
+            opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(prefix_bytes));
+            opts.set_block_based_table_factory(&tbl);
+            opts.set_write_buffer_size(64 << 20);
+            opts.set_max_write_buffer_number(6);
+            opts.set_min_write_buffer_number_to_merge(2);
+            opts.set_compaction_style(DBCompactionStyle::Level);
+            opts.set_level_zero_file_num_compaction_trigger(4);
+            opts.set_target_file_size_base(256 << 20);
+            opts.set_compression_type(DBCompressionType::Lz4);
+            opts
+        }
 
-        let metadata_table_opts = BlockBasedOptions::default();
+        // Metadata CF with no compression
         let mut metadata_opts = Options::default();
-        metadata_opts.set_block_based_table_factory(&metadata_table_opts);
         metadata_opts.set_compression_type(DBCompressionType::None);
+        let mut depth24_opts = Options::default();
+        depth24_opts.set_compression_type(DBCompressionType::None);
 
+        // Define column families with tailored options
         let cfs = vec![
             ColumnFamilyDescriptor::new(LEAVES_CF, leaves_opts),
-            ColumnFamilyDescriptor::new(SUBTREES_CF, subtrees_opts),
-            ColumnFamilyDescriptor::new(UPPER_NODES_CF, upper_nodes_opts),
+            ColumnFamilyDescriptor::new(SUBTREE_24_CF, subtree_cf(&cache, 3)),
+            ColumnFamilyDescriptor::new(SUBTREE_32_CF, subtree_cf(&cache, 4)),
+            ColumnFamilyDescriptor::new(SUBTREE_40_CF, subtree_cf(&cache, 5)),
+            ColumnFamilyDescriptor::new(SUBTREE_48_CF, subtree_cf(&cache, 6)),
+            ColumnFamilyDescriptor::new(SUBTREE_56_CF, subtree_cf(&cache, 7)),
             ColumnFamilyDescriptor::new(METADATA_CF, metadata_opts),
+            ColumnFamilyDescriptor::new(DEPTH_24_CF, depth24_opts),
         ];
 
-        let db = DB::open_cf_descriptors(&db_opts, &path, cfs)
-            .map_err(|e| StorageError::BackendError(format!("Failed to open DB: {}", e)))?;
+        // Open the database with our tuned CFs
+        let db = DB::open_cf_descriptors(&db_opts, path, cfs)
+            .map_err(|e| StorageError::BackendError(format!("Failed to open DB: {e}")))?;
 
         Ok(Self { db: Arc::new(db) })
     }
 
+    /// Converts an index (u64) into a fixed-size byte array for use as a RocksDB key.
     #[inline(always)]
-    fn leaf_db_key(index: u64) -> [u8; 8] { index.to_be_bytes() }
-
-    #[inline(always)]
-    fn subtree_db_key(index: NodeIndex) -> [u8; 9] { Subtree::subtree_key(index) }
-
-    #[inline(always)]
-    fn upper_node_db_key(index: NodeIndex) -> [u8; 9] {
-        let mut key = [0u8; 9];
-        key[0] = index.depth();
-        key[1..].copy_from_slice(&index.value().to_be_bytes());
-        key
+    fn index_db_key(index: u64) -> [u8; 8] {
+        index.to_be_bytes()
     }
 
+    /// Converts a `NodeIndex` (for a subtree root) into a fixed-size byte array for use as a
+    /// RocksDB key. The 8 bytes represent the value.
+    #[inline(always)]
+    fn subtree_db_key(index: NodeIndex) -> [u8; 8] {
+        index.value().to_be_bytes()
+    }
+
+    /// Retrieves a handle to a RocksDB column family by its name.
+    ///
+    /// # Errors
+    /// Returns `StorageError::BackendError` if the column family with the given `name` does not
+    /// exist.
     fn cf_handle(&self, name: &str) -> Result<&rocksdb::ColumnFamily, StorageError> {
-        self.db.cf_handle(name).ok_or_else(|| StorageError::BackendError(format!("CF '{}' missing", name)))
+        self.db
+            .cf_handle(name)
+            .ok_or_else(|| StorageError::BackendError(format!("CF '{name}' missing")))
+    }
+
+    /* helper: CF handle from NodeIndex ------------------------------------- */
+    #[inline(always)]
+    fn subtree_cf(&self, index: NodeIndex) -> &rocksdb::ColumnFamily {
+        let name = cf_for_depth(index.depth());
+        self.cf_handle(name).expect("CF handle missing")
     }
 }
 
 impl SmtStorage for RocksDbStorage {
+    /// Retrieves the SMT root hash from the `METADATA_CF` column family.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the metadata column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If the retrieved root hash bytes cannot be
+    ///   deserialized.
     fn get_root(&self) -> Result<Option<RpoDigest>, StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
-        match self.db.get_cf(cf, ROOT_KEY).map_err(|e| StorageError::BackendError(e.to_string()))? {
+        match self
+            .db
+            .get_cf(cf, ROOT_KEY)
+            .map_err(|e| StorageError::BackendError(e.to_string()))?
+        {
             Some(bytes) => {
                 let digest = RpoDigest::read_from_bytes(&bytes)
                     .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
                 Ok(Some(digest))
-            }
+            },
             None => Ok(None),
         }
     }
 
-    fn get_leaf_count(&self) -> Result<usize, StorageError> {
+    /// Stores the SMT root hash in the `METADATA_CF` column family.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the metadata column family is missing or a RocksDB error
+    ///   occurs.
+    fn set_root(&self, root: RpoDigest) -> Result<(), StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
-        match self.db.get_cf(cf, LEAF_COUNT_KEY).map_err(|e| StorageError::BackendError(e.to_string()))? {
-            Some(bytes) => {
-                if bytes.len() == 8 {
-                    Ok(usize::from_be_bytes(bytes.try_into().unwrap()))
-                } else {
-                    Err(StorageError::DeserializationError("Invalid byte length for leaf count".to_string()))
+        self.db
+            .put_cf(cf, ROOT_KEY, root.to_bytes())
+            .map_err(|e| StorageError::BackendError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Retrieves the total count of non-empty leaves from the `METADATA_CF` column family.
+    /// Returns 0 if the count is not found.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the metadata column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If the retrieved count bytes are invalid.
+    fn leaf_count(&self) -> Result<usize, StorageError> {
+        let cf = self.cf_handle(METADATA_CF)?;
+        self.db
+            .get_cf(cf, LEAF_COUNT_KEY)
+            .map_err(|e| StorageError::BackendError(e.to_string()))?
+            .map_or(Ok(0), |bytes_vec| {
+                let actual_len = bytes_vec.len();
+                bytes_vec
+                    .try_into()
+                    .map_err(|_e| {
+                        StorageError::DeserializationError(format!(
+                            "Invalid byte length for leaf count: expected 8, got {actual_len}"
+                        ))
+                    })
+                    .map(usize::from_be_bytes)
+            })
+    }
+
+    /// Retrieves the total count of key-value entries from the `METADATA_CF` column family.
+    /// Returns 0 if the count is not found.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the metadata column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If the retrieved count bytes are invalid.
+    fn entry_count(&self) -> Result<usize, StorageError> {
+        let cf = self.cf_handle(METADATA_CF)?;
+        self.db
+            .get_cf(cf, ENTRY_COUNT_KEY)
+            .map_err(|e| StorageError::BackendError(e.to_string()))?
+            .map_or(Ok(0), |bytes_vec| {
+                let actual_len = bytes_vec.len();
+                bytes_vec
+                    .try_into()
+                    .map_err(|_e| {
+                        StorageError::DeserializationError(format!(
+                            "Invalid byte length for entry count: expected 8, got {actual_len}"
+                        ))
+                    })
+                    .map(usize::from_be_bytes)
+            })
+    }
+
+    /// Inserts a key-value pair into the SMT leaf at the specified logical `index`.
+    ///
+    /// This operation involves:
+    /// 1. Retrieving the current leaf (if any) at `index`.
+    /// 2. Inserting the new key-value pair into the leaf.
+    /// 3. Updating the leaf and entry counts in the metadata column family.
+    /// 4. Writing all changes (leaf data, counts) to RocksDB in a single batch.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If column families are missing or a RocksDB error occurs.
+    /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
+    /// - `StorageError::SerializationError`: If the updated leaf cannot be serialized.
+    fn insert_value(
+        &self,
+        index: u64,
+        key: RpoDigest,
+        value: Word,
+    ) -> Result<Option<Word>, StorageError> {
+        debug_assert_ne!(value, EMPTY_WORD);
+
+        let mut batch = WriteBatch::default();
+
+        // Fetch initial counts.
+        let mut current_leaf_count = self.leaf_count()?;
+        let mut current_entry_count = self.entry_count()?;
+
+        let leaves_cf = self.cf_handle(LEAVES_CF)?;
+        let db_key = Self::index_db_key(index);
+
+        let maybe_leaf = self.get_leaf(index)?;
+
+        let value_to_return: Option<Word> = match maybe_leaf {
+            Some(mut existing_leaf) => {
+                let old_value = existing_leaf.insert(key, value);
+                // Determine if the overall SMT entry_count needs to change.
+                // entry_count increases if:
+                //   1. The key was not present in this leaf before (`old_value` is `None`).
+                //   2. The key was present but held `EMPTY_WORD` (`old_value` is
+                //      `Some(EMPTY_WORD)`).
+                if old_value.is_none_or(|old_v| old_v == EMPTY_WORD) {
+                    current_entry_count += 1;
+                }
+                // current_leaf_count does not change because the leaf itself already existed.
+                batch.put_cf(leaves_cf, db_key, existing_leaf.to_bytes());
+                old_value
+            },
+            None => {
+                // Leaf at `index` does not exist, so create a new one.
+                let new_leaf = SmtLeaf::Single((key, value));
+                // A new leaf is created.
+                current_leaf_count += 1;
+                // This new leaf contains one new SMT entry.
+                current_entry_count += 1;
+                batch.put_cf(leaves_cf, db_key, new_leaf.to_bytes());
+                // No previous value, as the leaf (and thus the key in it) was new.
+                None
+            },
+        };
+
+        // Add updated metadata counts to the batch.
+        let metadata_cf = self.cf_handle(METADATA_CF)?;
+        batch.put_cf(metadata_cf, LEAF_COUNT_KEY, current_leaf_count.to_be_bytes());
+        batch.put_cf(metadata_cf, ENTRY_COUNT_KEY, current_entry_count.to_be_bytes());
+
+        // Atomically write all changes (leaf data and metadata counts).
+        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
+
+        Ok(value_to_return)
+    }
+
+    /// Removes a key-value pair from the SMT leaf at the specified logical `index`.
+    ///
+    /// This operation involves:
+    /// 1. Retrieving the leaf at `index`.
+    /// 2. Removing the `key` from the leaf. If the leaf becomes empty, it's deleted from RocksDB.
+    /// 3. Updating the leaf and entry counts in the metadata column family.
+    /// 4. Writing all changes (leaf data/deletion, counts) to RocksDB in a single batch.
+    ///
+    /// Returns `Ok(None)` if the leaf at `index` does not exist or the `key` is not found.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If column families are missing or a RocksDB error occurs.
+    /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
+    /// - `StorageError::SerializationError`: If an updated leaf (if not deleted) cannot be
+    ///   serialized.
+    fn remove_value(&self, index: u64, key: RpoDigest) -> Result<Option<Word>, StorageError> {
+        if let Some(mut leaf) = self.get_leaf(index)? {
+            let mut batch = WriteBatch::default();
+            let cf = self.cf_handle(LEAVES_CF)?;
+            let metadata_cf = self.cf_handle(METADATA_CF)?;
+            let db_key = Self::index_db_key(index);
+            let mut entry_count = self.entry_count()?;
+            let mut leaf_count = self.leaf_count()?;
+
+            let (current_value, is_empty) = leaf.remove(key);
+            if let Some(current_value) = current_value {
+                if current_value != EMPTY_WORD {
+                    entry_count -= 1;
                 }
             }
-            None => Ok(0),
+            if is_empty {
+                leaf_count -= 1;
+                batch.delete_cf(cf, db_key);
+            } else {
+                batch.put_cf(cf, db_key, leaf.to_bytes());
+            }
+            batch.put_cf(metadata_cf, LEAF_COUNT_KEY, leaf_count.to_be_bytes());
+            batch.put_cf(metadata_cf, ENTRY_COUNT_KEY, entry_count.to_be_bytes());
+            self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
+            Ok(current_value)
+        } else {
+            Ok(None)
         }
     }
 
-    fn get_entry_count(&self) -> Result<usize, StorageError> {
-         let cf = self.cf_handle(METADATA_CF)?;
-         match self.db.get_cf(cf, ENTRY_COUNT_KEY).map_err(|e| StorageError::BackendError(e.to_string()))? {
-             Some(bytes) => {
-                 if bytes.len() == 8 {
-                     Ok(usize::from_be_bytes(bytes.try_into().unwrap()))
-                 } else {
-                     Err(StorageError::DeserializationError("Invalid byte length for entry count".to_string()))
-                 }
-             }
-             None => Ok(0),
-         }
-    }
-
+    /// Retrieves a single SMT leaf node by its logical `index` from the `LEAVES_CF` column family.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the leaves column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If the retrieved leaf data is corrupt.
     fn get_leaf(&self, index: u64) -> Result<Option<SmtLeaf>, StorageError> {
         let cf = self.cf_handle(LEAVES_CF)?;
-        let key = Self::leaf_db_key(index);
-        match self.db.get_cf(cf, &key).map_err(|e| StorageError::BackendError(e.to_string()))? {
+        let key = Self::index_db_key(index);
+        match self.db.get_cf(cf, key).map_err(|e| StorageError::BackendError(e.to_string()))? {
             Some(bytes) => {
-                 let leaf = SmtLeaf::read_from_bytes(&bytes)
-                      .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
-                  Ok(Some(leaf))
-             },
-             None => Ok(None),
-         }
+                let leaf = SmtLeaf::read_from_bytes(&bytes)
+                    .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
+                Ok(Some(leaf))
+            },
+            None => Ok(None),
+        }
     }
 
-    fn set_leaf(&self, index: u64, leaf: &SmtLeaf) -> Result<Option<SmtLeaf>, StorageError> {
+    /// Sets or updates multiple SMT leaf nodes in the `LEAVES_CF` column family.
+    ///
+    /// This method performs a batch write to RocksDB. It also updates the global
+    /// leaf and entry counts in the `METADATA_CF` based on the provided `leaves` map,
+    /// overwriting any previous counts.
+    ///
+    /// Note: This method assumes the provided `leaves` map represents the entirety
+    /// of leaves to be stored or that counts are being explicitly reset.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If column families are missing or a RocksDB error occurs.
+    /// - `StorageError::SerializationError`: If any leaf cannot be serialized.
+    fn set_leaves(&self, leaves: UnorderedMap<u64, SmtLeaf>) -> Result<(), StorageError> {
         let cf = self.cf_handle(LEAVES_CF)?;
-        let key = Self::leaf_db_key(index);
-        let old_bytes = self.db.get_cf(cf, &key).ok().flatten();
-        let value = leaf.to_bytes();
+        let leaf_count: usize = leaves.len();
+        let entry_count: usize = leaves.values().map(|leaf| leaf.entries().len()).sum();
+        let mut batch = WriteBatch::default();
+        for (idx, leaf) in leaves {
+            let key = Self::index_db_key(idx);
+            let value = leaf.to_bytes();
+            batch.put_cf(cf, key, &value);
+        }
+        let metadata_cf = self.cf_handle(METADATA_CF)?;
+        batch.put_cf(metadata_cf, LEAF_COUNT_KEY, leaf_count.to_be_bytes());
+        batch.put_cf(metadata_cf, ENTRY_COUNT_KEY, entry_count.to_be_bytes());
+        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Removes a single SMT leaf node by its logical `index` from the `LEAVES_CF` column family.
+    ///
+    /// Important: This method currently *does not* update the global leaf and entry counts
+    /// in the metadata. Callers are responsible for managing these counts separately
+    /// if using this method directly, or preferably use `apply` or `remove_value` which handle
+    /// counts.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the leaves column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If the retrieved (to be returned) leaf data is
+    ///   corrupt.
+    fn remove_leaf(&self, index: u64) -> Result<Option<SmtLeaf>, StorageError> {
+        let key = Self::index_db_key(index);
+        let cf = self.cf_handle(LEAVES_CF)?;
+        let old_bytes = self.db.get_cf(cf, key).ok().flatten();
         self.db
-            .put_cf(cf, &key, &value)
+            .delete_cf(cf, key)
             .map_err(|e| StorageError::BackendError(e.to_string()))?;
         Ok(old_bytes
             .map(|bytes| SmtLeaf::read_from_bytes(&bytes).expect("failed to deserialize leaf")))
     }
 
-    fn set_leaves(&self, leaves: UnorderedMap<u64, SmtLeaf>) -> Result<(), StorageError> {
-        let cf = self.cf_handle(LEAVES_CF)?;
-        let mut batch = WriteBatch::default();
-        for (idx, leaf) in leaves {
-            let key = Self::leaf_db_key(idx);
-            let value = leaf.to_bytes();
-            batch.put_cf(cf, &key, &value);
-        }
-        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
-        Ok(())
-    }
-
-    fn remove_leaf(&self, index: u64) -> Result<Option<SmtLeaf>, StorageError> {
-        let key = Self::leaf_db_key(index);
-        let cf = self.cf_handle(LEAVES_CF)?;
-        let old_bytes = self.db.get_cf(cf, &key).ok().flatten();
-        self.db.delete_cf(cf, &key).map_err(|e| StorageError::BackendError(e.to_string()))?;
-        Ok(old_bytes.map(|bytes| SmtLeaf::read_from_bytes(&bytes).expect("failed to deserialize leaf")))
-    }
-
+    /// Retrieves multiple SMT leaf nodes by their logical `indices` using RocksDB's `multi_get_cf`.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the leaves column family is missing or a RocksDB error
+    ///   occurs.
+    /// - `StorageError::DeserializationError`: If any retrieved leaf data is corrupt.
     fn get_leaves(&self, indices: &[u64]) -> Result<Vec<Option<SmtLeaf>>, StorageError> {
         let cf = self.cf_handle(LEAVES_CF)?;
-        let db_keys: Vec<[u8; 8]> = indices.iter().map(|&idx| Self::leaf_db_key(idx)).collect();
+        let db_keys: Vec<[u8; 8]> = indices.iter().map(|&idx| Self::index_db_key(idx)).collect();
         let results = self.db.multi_get_cf(db_keys.iter().map(|k| (cf, k.as_ref())));
 
-        results.into_iter().map(|result| {
-            match result {
+        results
+            .into_iter()
+            .map(|result| match result {
                 Ok(Some(bytes)) => SmtLeaf::read_from_bytes(&bytes)
-                                    .map(Some)
-                                    .map_err(|e| StorageError::DeserializationError(e.to_string())),
+                    .map(Some)
+                    .map_err(|e| StorageError::DeserializationError(e.to_string())),
                 Ok(None) => Ok(None),
                 Err(e) => Err(StorageError::BackendError(e.to_string())),
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     fn get_subtree(&self, index: NodeIndex) -> Result<Option<Subtree>, StorageError> {
-        let cf = self.cf_handle(SUBTREES_CF)?;
+        let cf = self.subtree_cf(index);
         let key = Self::subtree_db_key(index);
-         match self.db.get_cf(cf, &key).map_err(|e| StorageError::BackendError(e.to_string()))? {
-             Some(bytes) => {
-                  let subtree = Subtree::from_vec(index, &bytes)
-                       .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
-                   Ok(Some(subtree))
-              },
-              None => Ok(None),
-          }
+        match self.db.get_cf(cf, key).map_err(|e| StorageError::BackendError(e.to_string()))? {
+            Some(bytes) => {
+                let subtree = Subtree::from_vec(index, &bytes)
+                    .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
+                Ok(Some(subtree))
+            },
+            None => Ok(None),
+        }
     }
 
     fn get_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<Subtree>>, StorageError> {
-        let cf = self.cf_handle(SUBTREES_CF)?;
-        let db_keys: Vec<[u8; 9]> = indices.iter().map(|&idx| Self::subtree_db_key(idx)).collect();
-        let results = self.db.multi_get_cf(db_keys.iter().map(|k| (cf, k)));
+        use rayon::prelude::*;
+        
+        let mut depth_buckets: [Vec<(usize, NodeIndex)>; 5] = Default::default();
+        
+        for (original_index, &node_index) in indices.iter().enumerate() {
+            let depth = node_index.depth();
+            let bucket_index = match depth {
+                56 => 0,
+                48 => 1, 
+                40 => 2,
+                32 => 3,
+                24 => 4,
+                _ => return Err(StorageError::BackendError(format!(
+                    "unsupported subtree depth {depth}"
+                ))),
+            };
+            depth_buckets[bucket_index].push((original_index, node_index));
+        }
+        let mut results = vec![None; indices.len()];
 
-        results.into_iter().zip(indices).map(|(result, index)| {
-            match result {
-                Ok(Some(bytes)) => {
-                    Subtree::from_vec(*index, &bytes)
-                        .map(Some)
-                        .map_err(|e| StorageError::DeserializationError(e.to_string()))
-                },
-                Ok(None) => Ok(None),
-                Err(e) => Err(StorageError::BackendError(e.to_string())),
+        // Process depth buckets in parallel
+        let bucket_results: Result<Vec<_>, StorageError> = depth_buckets
+            .into_par_iter()
+            .enumerate()
+            .filter(|(_, bucket)| !bucket.is_empty())
+            .map(|(bucket_index, bucket)| -> Result<Vec<(usize, Option<Subtree>)>, StorageError> {
+                let depth = SUBTREE_DEPTHS[bucket_index];
+                let cf = self.cf_handle(cf_for_depth(depth))?;
+                let keys: Vec<_> = bucket.iter().map(|(_, idx)| Self::subtree_db_key(*idx)).collect();
+                
+                let db_results = self.db.multi_get_cf(keys.iter().map(|k| (cf, k.as_ref())));
+
+                // Process results for this bucket
+                bucket.into_iter()
+                    .zip(db_results)
+                    .map(|((original_index, node_index), db_result)| {
+                        let subtree = match db_result {
+                            Ok(Some(bytes)) => Some(
+                                Subtree::from_vec(node_index, &bytes)
+                                    .map_err(|e| StorageError::DeserializationError(e.to_string()))?
+                            ),
+                            Ok(None) => None,
+                            Err(e) => return Err(StorageError::BackendError(e.to_string())),
+                        };
+                        Ok((original_index, subtree))
+            })
+            .collect()
+            })
+            .collect();
+
+        // Flatten results and place them in correct positions
+        for bucket_result in bucket_results? {
+            for (original_index, subtree) in bucket_result {
+                results[original_index] = subtree;
             }
-        }).collect()
+        }
+
+        Ok(results)
     }
 
     fn set_subtree(&self, subtree: &Subtree) -> Result<(), StorageError> {
-        let cf = self.cf_handle(SUBTREES_CF)?;
-        let key = Self::subtree_db_key(subtree.root_index);
-        self.db.put_cf(cf, &key, subtree.to_vec()).map_err(|e| StorageError::BackendError(e.to_string()))?;
+        let subtrees_cf = self.subtree_cf(subtree.root_index());
+        let mut batch = WriteBatch::default();
+
+        let key = Self::subtree_db_key(subtree.root_index());
+        let value = subtree.to_vec();
+        batch.put_cf(subtrees_cf, key, value);
+
+        // Also update level 24 hash cache if this is a level 24 subtree
+        if subtree.root_index().depth() == IN_MEMORY_DEPTH {
+            let root_hash = subtree
+                .get_inner_node(subtree.root_index())
+                .ok_or_else(|| {
+                    StorageError::Other(
+                        "Subtree root node not found in its own subtree".to_string(),
+                    )
+                })?
+                .hash();
+
+            let depth24_cf = self.cf_handle(DEPTH_24_CF)?;
+            let hash_key = Self::index_db_key(subtree.root_index().value());
+            batch.put_cf(depth24_cf, hash_key, root_hash.to_bytes());
+        }
+
+        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
         Ok(())
     }
 
     fn set_subtrees(&self, subtrees: Vec<Subtree>) -> Result<(), StorageError> {
-        let cf = self.cf_handle(SUBTREES_CF)?;
+        let depth24_cf = self.cf_handle(DEPTH_24_CF)?;
         let mut batch = WriteBatch::default();
-        let serialized: Vec<([u8; 9], Vec<u8>)> = subtrees
-        .into_par_iter()
-        .map(|subtree| {
-            let key = Self::subtree_db_key(subtree.root_index);
+
+        for subtree in subtrees {
+            let subtrees_cf = self.subtree_cf(subtree.root_index());
+            let key = Self::subtree_db_key(subtree.root_index());
             let value = subtree.to_vec();
-            (key, value)
-        })
-        .collect();
-        for (key, value) in serialized {
-            batch.put_cf(cf, &key, value);
+            batch.put_cf(subtrees_cf, key, value);
+
+            if subtree.root_index().depth() == IN_MEMORY_DEPTH {
+                if let Some(root_node) = subtree.get_inner_node(subtree.root_index()) {
+                    let hash_key = Self::index_db_key(subtree.root_index().value());
+                    batch.put_cf(depth24_cf, hash_key, root_node.hash().to_bytes());
+                }
+            }
         }
+
         self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
         Ok(())
     }
 
+    /// Removes a single SMT Subtree from storage, identified by its root `NodeIndex`.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the subtrees column family is missing or a RocksDB error
+    ///   occurs.
     fn remove_subtree(&self, index: NodeIndex) -> Result<(), StorageError> {
-        let cf = self.cf_handle(SUBTREES_CF)?;
+        let subtrees_cf = self.subtree_cf(index);
+        let mut batch = WriteBatch::default();
+
         let key = Self::subtree_db_key(index);
-        self.db.delete_cf(cf, &key).map_err(|e| StorageError::BackendError(e.to_string()))?;
+        batch.delete_cf(subtrees_cf, key);
+
+        // Also remove level 24 hash cache if this is a level 24 subtree
+        if index.depth() == IN_MEMORY_DEPTH {
+            let depth24_cf = self.cf_handle(DEPTH_24_CF)?;
+            let hash_key = Self::index_db_key(index.value());
+            batch.delete_cf(depth24_cf, hash_key);
+        }
+
+        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
         Ok(())
     }
 
+    /// Retrieves a single inner node (non-leaf node) from within a Subtree.
+    ///
+    /// This method is intended for accessing nodes at depths greater than or equal to
+    /// `IN_MEMORY_DEPTH`. It first finds the appropriate Subtree containing the `index`, then
+    /// delegates to `Subtree::get_inner_node()`.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors
+    ///   occur.
+    /// - `StorageError::DeserializationError`: If the containing Subtree data is corrupt.
     fn get_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
-        if index.depth() <= IN_MEMORY_DEPTH {
-            let cf = self.cf_handle(UPPER_NODES_CF)?;
-            let key = Self::upper_node_db_key(index);
-            match self.db.get_cf(cf, &key).map_err(|e| StorageError::BackendError(e.to_string()))? {
-                Some(bytes) => {
-                    let node = InnerNode::read_from_bytes(&bytes)
-                        .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
-                    return Ok(Some(node));
-                },
-                None => return Ok(None),
-            }
-        }
-        let subtree_root_index = Subtree::find_subtree_root(index);
-        let subtree = self.get_subtree(subtree_root_index).expect("failed to get subtree");
-        if let Some(subtree) = subtree {
-            Ok(subtree.get_inner_node(index))
+        if index.depth() < IN_MEMORY_DEPTH {
+            Err(StorageError::BackendError(
+                "Cannot get inner node from upper part of the tree".to_string(),
+            ))
         } else {
-            Ok(None)
+            let subtree_root_index = Subtree::find_subtree_root(index);
+            Ok(self
+                .get_subtree(subtree_root_index)?
+                .and_then(|subtree| subtree.get_inner_node(index)))
         }
-    }   
-
-    fn get_upper_nodes(&self, indices: &[NodeIndex]) -> Result<Vec<Option<InnerNode>>, StorageError> {
-        let cf = self.cf_handle(UPPER_NODES_CF)?;
-        let db_keys: Vec<[u8; 9]> = indices.iter().map(|&idx| Self::upper_node_db_key(idx)).collect();
-        let results = self.db.multi_get_cf(db_keys.iter().map(|k| (cf, k)));
-        results.into_iter().map(|result| {
-            match result {
-                Ok(Some(bytes)) => InnerNode::read_from_bytes(&bytes)
-                                    .map(Some)
-                                    .map_err(|e| StorageError::DeserializationError(e.to_string())),
-                Ok(None) => Ok(None),
-                Err(e) => Err(StorageError::BackendError(e.into_string())),
-            }
-        }).collect()
     }
 
-    fn set_inner_node(&self, index: NodeIndex, node: InnerNode) -> Result<Option<InnerNode>, StorageError> {
-        if index.depth() <= IN_MEMORY_DEPTH {
-            let cf = self.cf_handle(UPPER_NODES_CF)?;
-            let key = Self::upper_node_db_key(index);
-            let old_bytes = self.db.get_cf(cf, &key).ok().flatten();
-            let value = node.to_bytes();
-            self.db
-                .put_cf(cf, &key, &value)
-                .map_err(|e| StorageError::BackendError(e.to_string()))?;
-            Ok(old_bytes.map(|bytes| {
-                InnerNode::read_from_bytes(&bytes).expect("failed to deserialize inner node")
-            }))
+    /// Sets or updates a single inner node (non-leaf node) within a Subtree.
+    ///
+    /// This method is intended for `index.depth() >= IN_MEMORY_DEPTH`.
+    /// If the target Subtree does not exist, it is created. The `node` is then
+    /// inserted into the Subtree, and the modified Subtree is written back to storage.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors
+    ///   occur.
+    /// - `StorageError::DeserializationError`: If existing Subtree data is corrupt.
+    /// - `StorageError::SerializationError`: If the modified Subtree cannot be serialized.
+    fn set_inner_node(
+        &self,
+        index: NodeIndex,
+        node: InnerNode,
+    ) -> Result<Option<InnerNode>, StorageError> {
+        if index.depth() < IN_MEMORY_DEPTH {
+            Err(StorageError::BackendError(
+                "Cannot set inner node in upper part of the tree".to_string(),
+            ))
         } else {
             let subtree_root_index = Subtree::find_subtree_root(index);
             let mut subtree = self
@@ -315,89 +673,345 @@ impl SmtStorage for RocksDbStorage {
         }
     }
 
+    /// Removes a single inner node (non-leaf node) from within a Subtree.
+    ///
+    /// This method is intended for `index.depth() >= IN_MEMORY_DEPTH`.
+    /// If the Subtree becomes empty after removing the node, the Subtree itself
+    /// is removed from storage.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors
+    ///   occur.
+    /// - `StorageError::DeserializationError`: If existing Subtree data is corrupt.
+    /// - `StorageError::SerializationError`: If a modified Subtree (if not deleted) cannot be
+    ///   serialized.
     fn remove_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
-        if index.depth() <= IN_MEMORY_DEPTH {
-            let cf = self.cf_handle(UPPER_NODES_CF)?;
-            let key = Self::upper_node_db_key(index);
-            let old_bytes = self.db.get_cf(cf, &key).ok().flatten();
-            self.db
-                .delete_cf(cf, &key)
-                .map_err(|e| StorageError::BackendError(e.to_string()))?;
-            Ok(old_bytes.map(|bytes| {
-                InnerNode::read_from_bytes(&bytes).expect("failed to deserialize inner node")
-            }))
+        if index.depth() < IN_MEMORY_DEPTH {
+            Err(StorageError::BackendError(
+                "Cannot remove inner node from upper part of the tree".to_string(),
+            ))
         } else {
             let subtree_root_index = Subtree::find_subtree_root(index);
-            if let Some(mut subtree) = self.get_subtree(subtree_root_index)? {
-                let old_node = subtree.remove_inner_node(index);
-                if subtree.is_empty() {
-                    self.remove_subtree(subtree_root_index)?;
-                } else {
-                    self.set_subtree(&subtree)?;
-                }
-                Ok(old_node)
-            } else {
-                // Subtree not found, so the node within it is also not found.
-                Ok(None)
-            }
+            self.get_subtree(subtree_root_index)
+                .and_then(|maybe_subtree| match maybe_subtree {
+                    Some(mut subtree) => {
+                        let old_node = subtree.remove_inner_node(index);
+                        let db_operation_result = if subtree.is_empty() {
+                            self.remove_subtree(subtree_root_index)
+                        } else {
+                            self.set_subtree(&subtree)
+                        };
+                        db_operation_result.map(|_| old_node)
+                    },
+                    None => Ok(None),
+                })
         }
     }
 
-    fn apply_batch(&self, updates: StorageUpdates) -> Result<(), StorageError> {
+    /// Applies a batch of `StorageUpdates` atomically to the RocksDB backend.
+    ///
+    /// This is the primary method for persisting changes to the SMT. It constructs a single
+    /// RocksDB `WriteBatch` containing all specified changes:
+    /// - Leaf updates/deletions in `LEAVES_CF`.
+    /// - Subtree updates/deletions in `SUBTREE_24_CF`, `SUBTREE_32_CF`, `SUBTREE_40_CF`, `SUBTREE_48_CF`, `SUBTREE_56_CF`.
+    /// - Updates to leaf and entry counts in `METADATA_CF` based on `leaf_count_delta` and
+    ///   `entry_count_delta`.
+    /// - Sets the new SMT root in `METADATA_CF`.
+    ///
+    /// All operations in the batch are applied atomically by RocksDB.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If any column family is missing or a RocksDB write error
+    ///   occurs.
+    /// - `StorageError::SerializationError`: If any leaf or subtree cannot be serialized.
+    fn apply(&self, updates: StorageUpdates) -> Result<(), StorageError> {
+        use rayon::prelude::*;
+
         let mut batch = WriteBatch::default();
 
         let leaves_cf = self.cf_handle(LEAVES_CF)?;
-        let subtrees_cf = self.cf_handle(SUBTREES_CF)?;
-        let upper_nodes_cf = self.cf_handle(UPPER_NODES_CF)?;
         let metadata_cf = self.cf_handle(METADATA_CF)?;
+        let depth24_cf = self.cf_handle(DEPTH_24_CF)?;
 
-        for (index, maybe_leaf) in updates.leaf_updates {
-            let key = Self::leaf_db_key(index);
+        let (leaf_updates, subtree_updates, new_root, leaf_count_delta, entry_count_delta) =
+            updates.into_parts();
+
+        // Process leaf updates
+        for (index, maybe_leaf) in leaf_updates {
+            let key = Self::index_db_key(index);
             match maybe_leaf {
-                Some(leaf) => {
-                    let bytes = leaf.to_bytes();
-                    batch.put_cf(leaves_cf, &key, bytes);
-                },
-                None => batch.delete_cf(leaves_cf, &key),
+                Some(leaf) => batch.put_cf(leaves_cf, key, leaf.to_bytes()),
+                None => batch.delete_cf(leaves_cf, key),
             }
         }
 
-        for (index, maybe_subtree) in updates.subtree_updates {
-             let key = Self::subtree_db_key(index);
-             match maybe_subtree {
-                 Some(subtree) => {
-                     let bytes = subtree.to_vec();
-                     batch.put_cf(subtrees_cf, &key, bytes);
-                 },
-                 None => batch.delete_cf(subtrees_cf, &key),
-             }
-        }
+        // Helper for depth 24 operations
+        let is_depth_24 = |index: NodeIndex| index.depth() == IN_MEMORY_DEPTH;
 
-        for (index, maybe_node) in updates.upper_node_updates {
-            let key = Self::upper_node_db_key(index);
-            match maybe_node {
-                Some(node) => {
-                    let bytes = node.to_bytes();
-                    batch.put_cf(upper_nodes_cf, &key, bytes);
+        // Parallel preparation of subtree operations
+        let subtree_ops: Result<Vec<_>, StorageError> = subtree_updates
+            .into_par_iter()
+            .map(|(index, maybe_subtree)| -> Result<_, StorageError> {
+                let key = Self::subtree_db_key(index);
+                let subtrees_cf = self.subtree_cf(index);
+                
+                let (maybe_bytes, depth24_op) = match maybe_subtree {
+                    Some(subtree) => {
+                        let bytes = subtree.to_vec();
+                        let depth24_op = is_depth_24(index)
+                            .then(|| subtree.get_inner_node(index))
+                            .flatten()
+                            .map(|root_node| {
+                                let hash_key = Self::index_db_key(index.value());
+                                (hash_key, Some(root_node.hash().to_bytes()))
+                            });
+                        (Some(bytes), depth24_op)
+                    },
+                    None => {
+                        let depth24_op = is_depth_24(index).then(|| {
+                            let hash_key = Self::index_db_key(index.value());
+                            (hash_key, None)
+                        });
+                        (None, depth24_op)
+                    }
+                };
+                
+                Ok((subtrees_cf, key, maybe_bytes, depth24_op))
+            })
+            .collect();
+
+        // Sequential batch building
+        for (subtrees_cf, key, maybe_bytes, depth24_op) in subtree_ops? {
+            match maybe_bytes {
+                Some(bytes) => batch.put_cf(subtrees_cf, key, bytes),
+                None => batch.delete_cf(subtrees_cf, key),
+            }
+            
+            if let Some((hash_key, maybe_hash_bytes)) = depth24_op {
+                match maybe_hash_bytes {
+                    Some(hash_bytes) => batch.put_cf(depth24_cf, hash_key, hash_bytes),
+                    None => batch.delete_cf(depth24_cf, hash_key),
                 }
-                None => batch.delete_cf(upper_nodes_cf, &key),
             }
         }
 
-        if updates.leaf_count_delta != 0 || updates.entry_count_delta != 0 {
-            let current_leaf_count = self.get_leaf_count()?;
-            let current_entry_count = self.get_entry_count()?;
+        if leaf_count_delta != 0 || entry_count_delta != 0 {
+            let current_leaf_count = self.leaf_count()?;
+            let current_entry_count = self.entry_count()?;
 
-            let new_leaf_count = current_leaf_count.saturating_add_signed(updates.leaf_count_delta);
-            let new_entry_count = current_entry_count.saturating_add_signed(updates.entry_count_delta);
+            let new_leaf_count = current_leaf_count.saturating_add_signed(leaf_count_delta);
+            let new_entry_count = current_entry_count.saturating_add_signed(entry_count_delta);
 
-            batch.put_cf(metadata_cf, LEAF_COUNT_KEY, &new_leaf_count.to_be_bytes());
-            batch.put_cf(metadata_cf, ENTRY_COUNT_KEY, &new_entry_count.to_be_bytes());
+            batch.put_cf(metadata_cf, LEAF_COUNT_KEY, new_leaf_count.to_be_bytes());
+            batch.put_cf(metadata_cf, ENTRY_COUNT_KEY, new_entry_count.to_be_bytes());
         }
 
-        batch.put_cf(metadata_cf, ROOT_KEY, updates.new_root.to_bytes());
+        batch.put_cf(metadata_cf, ROOT_KEY, new_root.to_bytes());
 
-        self.db.write(batch).map_err(|e| StorageError::BackendError(e.to_string()))?;
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(false);
+        self.db.write_opt(batch, &write_opts).map_err(|e| StorageError::BackendError(e.to_string()))?;
+
         Ok(())
+    }
+
+    /// Returns an iterator over all (logical u64 index, `SmtLeaf`) pairs in the `LEAVES_CF`.
+    ///
+    /// The iterator uses a RocksDB snapshot for consistency and iterates in lexicographical
+    /// order of the keys (leaf indices). Errors during iteration (e.g., deserialization issues)
+    /// cause the iterator to skip the problematic item and attempt to continue.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the leaves column family is missing or a RocksDB error
+    ///   occurs during iterator creation.
+    fn iter_leaves(&self) -> Result<Box<dyn Iterator<Item = (u64, SmtLeaf)> + '_>, StorageError> {
+        let cf = self.cf_handle(LEAVES_CF)?;
+        let mut read_opts = ReadOptions::default();
+        read_opts.set_total_order_seek(true); // Good for full scans
+        let db_iter = self.db.iterator_cf_opt(cf, read_opts, IteratorMode::Start);
+
+        Ok(Box::new(RocksDbDirectLeafIterator { iter: db_iter }))
+    }
+
+    /// Returns an iterator over all `Subtree` instances across all subtree column families.
+    ///
+    /// The iterator uses a RocksDB snapshot and iterates in lexicographical order of keys
+    /// (subtree root NodeIndex) across all depth column families (24, 32, 40, 48, 56).
+    /// Errors during iteration (e.g., deserialization issues) cause the iterator to skip 
+    /// the problematic item and attempt to continue.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If any subtree column family is missing or a RocksDB error
+    ///   occurs during iterator creation.
+    fn iter_subtrees(&self) -> Result<Box<dyn Iterator<Item = Subtree> + '_>, StorageError> {
+        // All subtree column family names in order
+        const SUBTREE_CFS: [&str; 5] = [SUBTREE_24_CF, SUBTREE_32_CF, SUBTREE_40_CF, SUBTREE_48_CF, SUBTREE_56_CF];
+        
+        let mut cf_handles = Vec::new();
+        for cf_name in SUBTREE_CFS {
+            cf_handles.push(self.cf_handle(cf_name)?);
+        }
+
+        Ok(Box::new(RocksDbSubtreeIterator::new(&self.db, cf_handles)))
+    }
+
+    /// Retrieves all depth 24 hashes for fast tree rebuilding.
+    ///
+    /// # Errors
+    /// - `StorageError::BackendError`: If the depth24 column family is missing or a RocksDB
+    ///   error occurs.
+    /// - `StorageError::DeserializationError`: If any hash bytes are corrupt.
+    fn get_depth24(&self) -> Result<Vec<(u64, RpoDigest)>, StorageError> {
+        let cf = self.cf_handle(DEPTH_24_CF)?;
+        let iter = self.db.iterator_cf(cf, IteratorMode::Start);
+        let mut hashes = Vec::new();
+
+        for item in iter {
+            let (key_bytes, value_bytes) =
+                item.map_err(|e| StorageError::BackendError(e.to_string()))?;
+
+            let index = index_from_key_bytes(&key_bytes)?;
+            let hash = RpoDigest::read_from_bytes(&value_bytes)
+                .map_err(|e| StorageError::DeserializationError(e.to_string()))?;
+
+            hashes.push((index, hash));
+        }
+
+        Ok(hashes)
+    }
+}
+
+/// An iterator over leaves directly from RocksDB.
+///
+/// Wraps a `DBIteratorWithThreadMode` and handles deserialization of keys to `u64` (leaf index)
+/// and values to `SmtLeaf`. Skips items that fail to deserialize or if a RocksDB error occurs
+/// for an item, attempting to continue iteration.
+struct RocksDbDirectLeafIterator<'a> {
+    iter: DBIteratorWithThreadMode<'a, DB>,
+}
+
+impl Iterator for RocksDbDirectLeafIterator<'_> {
+    type Item = (u64, SmtLeaf);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find_map(|result| {
+            let (key_bytes, value_bytes) = result.ok()?;
+            let leaf_idx = index_from_key_bytes(&key_bytes).ok()?;
+            let leaf = SmtLeaf::read_from_bytes(&value_bytes).ok()?;
+            Some((leaf_idx, leaf))
+        })
+    }
+}
+
+/// An iterator over subtrees from multiple RocksDB column families.
+///
+/// Iterates through all subtree column families (24, 32, 40, 48, 56) sequentially.
+/// When one column family is exhausted, it moves to the next one.
+struct RocksDbSubtreeIterator<'a> {
+    db: &'a DB,
+    cf_handles: Vec<&'a rocksdb::ColumnFamily>,
+    current_cf_index: usize,
+    current_iter: Option<DBIteratorWithThreadMode<'a, DB>>,
+}
+
+impl<'a> RocksDbSubtreeIterator<'a> {
+    fn new(db: &'a DB, cf_handles: Vec<&'a rocksdb::ColumnFamily>) -> Self {
+        let mut iterator = Self {
+            db,
+            cf_handles,
+            current_cf_index: 0,
+            current_iter: None,
+        };
+        iterator.advance_to_next_cf();
+        iterator
+    }
+
+    fn advance_to_next_cf(&mut self) {
+        if self.current_cf_index < self.cf_handles.len() {
+            let cf = self.cf_handles[self.current_cf_index];
+            let mut read_opts = ReadOptions::default();
+            read_opts.set_total_order_seek(true);
+            self.current_iter = Some(self.db.iterator_cf_opt(cf, read_opts, IteratorMode::Start));
+        } else {
+            self.current_iter = None;
+        }
+    }
+
+    fn try_next_from_iter(iter: &mut DBIteratorWithThreadMode<DB>, cf_index: usize) -> Option<Subtree> {
+        iter.find_map(|result| {
+            let (key_bytes, value_bytes) = result.ok()?;
+            let depth = 24 + (cf_index * 8) as u8;
+            
+            let node_idx = node_index_from_key_bytes(&key_bytes, depth).ok()?;
+            let value_vec = value_bytes.into_vec();
+            Subtree::from_vec(node_idx, &value_vec).ok()
+        })
+    }
+}
+
+impl Iterator for RocksDbSubtreeIterator<'_> {
+    type Item = Subtree;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let iter = self.current_iter.as_mut()?;
+            
+            // Try to get the next valid subtree from current iterator
+            if let Some(subtree) = Self::try_next_from_iter(iter, self.current_cf_index) {
+                return Some(subtree);
+            }
+            
+            // Current CF exhausted, advance to next
+            self.current_cf_index += 1;
+            self.advance_to_next_cf();
+            
+            // If no more CFs, we're done
+            if self.current_iter.is_none() {
+                return None;
+            }
+        }
+    }
+}
+
+/// Deserializes an index (u64) from a RocksDB key byte slice.
+/// Expects `key_bytes` to be exactly 8 bytes long.
+///
+/// # Errors
+/// - `StorageError::DeserializationError`: If `key_bytes` is not 8 bytes long or conversion fails.
+fn index_from_key_bytes(key_bytes: &[u8]) -> Result<u64, StorageError> {
+    if key_bytes.len() != 8 {
+        return Err(StorageError::DeserializationError(
+            "Invalid key length for leaf index".to_string(),
+        ));
+    }
+    let arr: [u8; 8] = key_bytes
+        .try_into()
+        .map_err(|_| StorageError::DeserializationError("Key to [u8; 8] failed".to_string()))?;
+    Ok(u64::from_be_bytes(arr))
+}
+
+/// Deserializes a `NodeIndex` from a RocksDB key byte slice.
+/// Expects `key_bytes` to be exactly 9 bytes long (1 byte for depth, 8 bytes for value).
+///
+/// # Errors
+/// - `StorageError::DeserializationError`: If `key_bytes` is not 9 bytes, or conversion to `u64`
+///   for the value fails, or the depth/value combination is invalid for `NodeIndex`.
+/// - `StorageError::Other`: If `NodeIndex::new` fails for other reasons.
+fn node_index_from_key_bytes(key_bytes: &[u8], depth: u8) -> Result<NodeIndex, StorageError> {
+    let value = index_from_key_bytes(key_bytes)?;
+    NodeIndex::new(depth, value)
+        .map_err(|e| StorageError::Other(format!("Failed to create NodeIndex: {e}")))
+}
+
+// helper that maps an SMT depth to its column family
+#[inline(always)]
+fn cf_for_depth(depth: u8) -> &'static str {
+    match depth {
+        24 => SUBTREE_24_CF,
+        32 => SUBTREE_32_CF,
+        40 => SUBTREE_40_CF,
+        48 => SUBTREE_48_CF,
+        56 => SUBTREE_56_CF,
+        _  => panic!("unsupported subtree depth: {depth}"),
     }
 }

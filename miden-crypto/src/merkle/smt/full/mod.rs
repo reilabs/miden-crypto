@@ -15,8 +15,12 @@ mod proof;
 pub use proof::SmtProof;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
+#[cfg(feature = "concurrent")]
 mod large;
-pub use large::{LargeSmt, MemoryStorage, RocksDbStorage, SmtStorage};
+#[cfg(feature = "rocksdb")]
+pub use large::RocksDbStorage;
+#[cfg(feature = "concurrent")]
+pub use large::{LargeSmt, MemoryStorage, SmtStorage};
 
 // Concurrent implementation
 #[cfg(feature = "concurrent")]
@@ -26,6 +30,8 @@ pub use concurrent::{SubtreeLeaf, build_subtree_for_bench};
 
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "internal")]
+pub use large::test_details;
 
 // CONSTANTS
 // ================================================================================================
