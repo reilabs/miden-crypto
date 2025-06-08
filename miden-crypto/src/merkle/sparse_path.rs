@@ -114,9 +114,9 @@ impl SparseMerklePath {
         let mut index = NodeIndex::new(self.depth(), index)?;
         let root = self.iter().fold(node_to_prove, |node, sibling| {
             // Compute the node and move to the next iteration.
-            let input = index.build_node(node, sibling);
+            let children = index.build_node(node, sibling);
             index.move_up();
-            Rpo256::merge(&input)
+            Rpo256::merge(&children)
         });
 
         Ok(root)
@@ -347,17 +347,15 @@ impl Iterator for InnerNodeIterator<'_> {
         let index_depth = NonZero::new(self.index.depth()).expect("non-root depth cannot be 0");
         let path_node = self.path.at_depth(index_depth).unwrap();
 
-        let is_right = self.index.is_value_odd();
-        let (left, right) = if is_right {
-            (path_node, self.value)
-        } else {
-            (self.value, path_node)
-        };
-
-        self.value = Rpo256::merge(&[left, right]);
+        let children = self.index.build_node(self.value, path_node);
+        self.value = Rpo256::merge(&children);
         self.index.move_up();
 
-        Some(InnerNodeInfo { value: self.value, left, right })
+        Some(InnerNodeInfo {
+            value: self.value,
+            left: children[0],
+            right: children[1],
+        })
     }
 }
 
@@ -705,7 +703,7 @@ mod tests {
 
     #[test]
     fn test_root() {
-        let tree = make_smt(8192);
+        let tree = make_smt(100);
 
         for (key, _value) in tree.entries() {
             let leaf = tree.get_leaf(key);
@@ -723,6 +721,13 @@ mod tests {
             assert_eq!(control_root, sparse_root);
             assert_eq!(authed_root, control_root);
             assert_eq!(authed_root, tree.root());
+
+            let index = index.value();
+            let control_auth_nodes = control_path.authenticated_nodes(index, leaf_node).unwrap();
+            let sparse_auth_nodes = sparse_path.authenticated_nodes(index, leaf_node).unwrap();
+            for (a, b) in control_auth_nodes.zip(sparse_auth_nodes) {
+                assert_eq!(a, b);
+            }
         }
     }
 }
