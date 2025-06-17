@@ -1,4 +1,4 @@
-## 0.15.0 (TBD)
+## 0.15.0 (2025-06-17)
 
 - [BREAKING] Use a rich newtype for Merkle mountain range types' forest values (#400).
 - Allow pre-sorted entries in `Smt` (#406).
@@ -12,8 +12,8 @@
 - [BREAKING] Replaced `RpxDigest` with `Word` struct (#420).
 - Added `word!` macro to `miden-crypto` (#423).
 - Added test vectors for RpoFalcon512 (#425).
-- [BREAKING] Incremented MSRV to 1.87.
 - [BREAKING] Updated Winterfell dependency to v0.13 and licensed the project under the Apache 2.0 license (in addition to the MIT)(#433).
+- [BREAKING] Incremented MSRV to 1.87.
 
 ## 0.14.1 (2025-05-31)
 

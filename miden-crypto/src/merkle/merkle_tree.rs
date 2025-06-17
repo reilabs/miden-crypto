@@ -119,7 +119,7 @@ impl MerkleTree {
     /// Returns n iterator over every inner node of this [MerkleTree].
     ///
     /// The iterator order is unspecified.
-    pub fn inner_nodes(&self) -> InnerNodeIterator {
+    pub fn inner_nodes(&self) -> InnerNodeIterator<'_> {
         InnerNodeIterator {
             nodes: &self.nodes,
             index: 1, // index 0 is just padding, start at 1

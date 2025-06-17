@@ -159,7 +159,7 @@ impl SparseMerklePath {
         &self,
         index: u64,
         node_to_prove: Word,
-    ) -> Result<InnerNodeIterator, MerkleError> {
+    ) -> Result<InnerNodeIterator<'_>, MerkleError> {
         let index = NodeIndex::new(self.depth(), index)?;
         Ok(InnerNodeIterator { path: self, index, value: node_to_prove })
     }

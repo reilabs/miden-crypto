@@ -105,7 +105,7 @@ impl MerklePath {
         &self,
         index: u64,
         node_to_prove: Word,
-    ) -> Result<InnerNodeIterator, MerkleError> {
+    ) -> Result<InnerNodeIterator<'_>, MerkleError> {
         Ok(InnerNodeIterator {
             nodes: &self.nodes,
             index: NodeIndex::new(self.depth(), index)?,
