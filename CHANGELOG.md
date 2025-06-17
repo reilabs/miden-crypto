@@ -1,3 +1,5 @@
+## 0.16.0 (TBD)
+
 ## 0.15.0 (2025-06-17)
 
 - [BREAKING] Use a rich newtype for Merkle mountain range types' forest values (#400).
