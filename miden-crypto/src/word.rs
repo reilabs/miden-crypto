@@ -3,7 +3,7 @@ use core::{
     cmp::Ordering,
     fmt::Display,
     hash::{Hash, Hasher},
-    ops::Deref,
+    ops::{Deref, DerefMut, Index, IndexMut, Range},
     slice,
 };
 
@@ -95,6 +95,40 @@ impl Deref for Word {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Word {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Index<usize> for Word {
+    type Output = Felt;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Word {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl Index<Range<usize>> for Word {
+    type Output = [Felt];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<Range<usize>> for Word {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut Self::Output {
+        &mut self.0[index]
     }
 }
 
@@ -698,6 +732,41 @@ mod tests {
         let v: String = (&word).into();
         let v2: Word = (&v).try_into().unwrap();
         assert_eq!(word, v2);
+    }
+
+    #[test]
+    fn test_index() {
+        let word =
+            Word::new([Felt::from(1_u32), Felt::from(2_u32), Felt::from(3_u32), Felt::from(4_u32)]);
+        assert_eq!(word[0], Felt::from(1_u32));
+        assert_eq!(word[1], Felt::from(2_u32));
+        assert_eq!(word[2], Felt::from(3_u32));
+        assert_eq!(word[3], Felt::from(4_u32));
+    }
+
+    #[test]
+    fn test_index_mut() {
+        let mut word =
+            Word::new([Felt::from(1_u32), Felt::from(2_u32), Felt::from(3_u32), Felt::from(4_u32)]);
+
+        word[0] = Felt::from(5_u32);
+        word[1] = Felt::from(6_u32);
+        word[2] = Felt::from(7_u32);
+        word[3] = Felt::from(8_u32);
+        assert_eq!(word[0], Felt::from(5_u32));
+        assert_eq!(word[1], Felt::from(6_u32));
+        assert_eq!(word[2], Felt::from(7_u32));
+        assert_eq!(word[3], Felt::from(8_u32));
+    }
+
+    #[test]
+    fn test_index_mut_range() {
+        let mut word =
+            Word::new([Felt::from(1_u32), Felt::from(2_u32), Felt::from(3_u32), Felt::from(4_u32)]);
+
+        word[1..3].copy_from_slice(&[Felt::from(6_u32), Felt::from(7_u32)]);
+        assert_eq!(word[1], Felt::from(6_u32));
+        assert_eq!(word[2], Felt::from(7_u32));
     }
 
     #[rstest::rstest]
