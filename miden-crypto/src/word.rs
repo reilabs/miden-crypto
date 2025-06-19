@@ -192,18 +192,18 @@ impl Randomizable for Word {
 /// Errors that can occur when working with a [Word].
 #[derive(Debug, Error)]
 pub enum WordError {
-    /// Failed to convert the word's field elements to the specified type.
-    #[error("failed to convert the word's field elements to type {0}")]
-    TypeConversion(&'static str),
-    /// Field element conversion failed due to invalid value.
-    #[error("failed to convert to field element: {0}")]
-    InvalidFieldElement(String),
-    /// Field elements parsed are out of range.
-    #[error("values of a Word must be inside the field modulus")]
-    OutOfRange,
     /// Hex-encoded field elements parsed are invalid.
     #[error("hex encoded values of a word are invalid")]
     HexParse(#[from] HexParseError),
+    /// Field element conversion failed due to invalid value.
+    #[error("failed to convert to field element: {0}")]
+    InvalidFieldElement(String),
+    /// Failed to convert a slice to an array of expected length.
+    #[error("invalid input length: expected {1} {0}, but received {2}")]
+    InvalidInputLength(&'static str, usize, usize),
+    /// Failed to convert the word's field elements to the specified type.
+    #[error("failed to convert the word's field elements to type {0}")]
+    TypeConversion(&'static str),
 }
 
 impl TryFrom<&Word> for [bool; WORD_SIZE_FELT] {
@@ -452,11 +452,12 @@ impl TryFrom<[u8; WORD_SIZE_BYTES]> for Word {
         let c = u64::from_le_bytes(value[16..24].try_into().unwrap());
         let d = u64::from_le_bytes(value[24..32].try_into().unwrap());
 
-        if [a, b, c, d].iter().any(|v| *v >= Felt::MODULUS) {
-            return Err(WordError::OutOfRange);
-        }
+        let a: Felt = a.try_into().map_err(WordError::InvalidFieldElement)?;
+        let b: Felt = b.try_into().map_err(WordError::InvalidFieldElement)?;
+        let c: Felt = c.try_into().map_err(WordError::InvalidFieldElement)?;
+        let d: Felt = d.try_into().map_err(WordError::InvalidFieldElement)?;
 
-        Ok(Word([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]))
+        Ok(Word([a, b, c, d]))
     }
 }
 
@@ -464,7 +465,21 @@ impl TryFrom<&[u8]> for Word {
     type Error = WordError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        (*value).try_into()
+        let value: [u8; WORD_SIZE_BYTES] = value
+            .try_into()
+            .map_err(|_| WordError::InvalidInputLength("bytes", WORD_SIZE_BYTES, value.len()))?;
+        value.try_into()
+    }
+}
+
+impl TryFrom<&[Felt]> for Word {
+    type Error = WordError;
+
+    fn try_from(value: &[Felt]) -> Result<Self, Self::Error> {
+        let value: [Felt; WORD_SIZE_FELT] = value
+            .try_into()
+            .map_err(|_| WordError::InvalidInputLength("elements", WORD_SIZE_FELT, value.len()))?;
+        Ok(value.into())
     }
 }
 
