@@ -1,5 +1,11 @@
 ## 0.16.0 (TBD)
 
+
+## 0.15.1 (2025-06-18)
+
+- Implement `DerefMut`, `Index`, and `IndexMut` for `Word` (#434).
+
+
 ## 0.15.0 (2025-06-17)
 
 - [BREAKING] Use a rich newtype for Merkle mountain range types' forest values (#400).
@@ -19,10 +25,8 @@
 
 ## 0.14.1 (2025-05-31)
 
-- Added missing `PartialSmt` APIs (#417).
 - Add module and function documentation. (#408).
-- [BREAKING] Replace `RpoDigest` with `Word` struct (#411).
-- Replace `RpxDigest` with `Word` struct (#420).
+- Added missing `PartialSmt` APIs (#417).
 
 ## 0.14.0 (2025-03-15)
 
