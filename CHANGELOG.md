@@ -1,6 +1,10 @@
+## 0.15.2 (2025-06-18)
+
+- Added `to_vec()` method to `Word` (#435).
+
 ## 0.15.1 (2025-06-18)
 
-- Implement `DerefMut`, `Index`, and `IndexMut` for `Word` (#434).
+- Implemented `DerefMut`, `Index`, and `IndexMut` for `Word` (#434).
 
 ## 0.15.0 (2025-06-17)
 
