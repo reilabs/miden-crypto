@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::{
     cmp::Ordering,
     fmt::Display,
@@ -66,7 +66,7 @@ impl Word {
     }
 
     /// Returns all elements of multiple words as a slice.
-    pub(crate) fn words_as_elements(words: &[Self]) -> &[Felt] {
+    pub fn words_as_elements(words: &[Self]) -> &[Felt] {
         let p = words.as_ptr();
         let len = words.len() * WORD_SIZE_FELT;
         unsafe { slice::from_raw_parts(p as *const Felt, len) }
@@ -75,6 +75,11 @@ impl Word {
     /// Returns hexadecimal representation of this word prefixed with `0x`.
     pub fn to_hex(&self) -> String {
         bytes_to_hex_string(self.as_bytes())
+    }
+
+    /// Returns internal elements of this word as a vector.
+    pub fn to_vec(&self) -> Vec<Felt> {
+        self.0.to_vec()
     }
 }
 
