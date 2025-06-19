@@ -1,6 +1,11 @@
+## 0.15.3 (2025-06-18)
+
+- Fixed conversion error from a slice of bytes into `Word`.
+- Added from element slice into `Word` conversion.
+
 ## 0.15.2 (2025-06-18)
 
-- Added `to_vec()` method to `Word` (#435).
+- Added `to_vec()` method to `Word`.
 
 ## 0.15.1 (2025-06-18)
 
