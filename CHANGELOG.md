@@ -1,3 +1,7 @@
+## 0.15.1 (2025-06-18)
+
+- Implement `DerefMut`, `Index`, and `IndexMut` for `Word` (#434).
+
 ## 0.15.0 (2025-06-17)
 
 - [BREAKING] Use a rich newtype for Merkle mountain range types' forest values (#400).
