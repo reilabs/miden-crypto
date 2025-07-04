@@ -9,10 +9,10 @@ use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex
 use crate::{EMPTY_WORD, Felt, Word, hash::rpo::Rpo256};
 
 mod full;
-#[cfg(feature = "rocksdb")]
-pub use full::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "concurrent")]
 pub use full::{LargeSmt, MemoryStorage};
+#[cfg(feature = "rocksdb")]
+pub use full::{RocksDbConfig, RocksDbStorage};
 pub use full::{SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
 #[cfg(feature = "internal")]
 pub use full::{SubtreeLeaf, build_subtree_for_bench};

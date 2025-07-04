@@ -122,8 +122,6 @@ impl Subtree {
                     )
                 })?;
 
-                //let left = RpoDigest::read_from_bytes(&node_bytes[..32])?;
-                //let right = RpoDigest::read_from_bytes(&node_bytes[32..])?;
                 let node = InnerNode::read_from_bytes(node_bytes)?;
                 nodes.insert(local_index, node);
                 Ok(())

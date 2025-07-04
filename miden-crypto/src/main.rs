@@ -283,7 +283,8 @@ fn get_storage(database_path: Option<PathBuf>, open: bool) -> Storage {
         }
         std::fs::create_dir_all(path.clone()).expect("Failed to create database directory");
     }
-    Storage::open(RocksDbConfig::new(path).with_cache_size(1 << 30).with_max_open_files(1024)).expect("Failed to open database")
+    Storage::open(RocksDbConfig::new(path).with_cache_size(1 << 30).with_max_open_files(1024))
+        .expect("Failed to open database")
 }
 
 #[cfg(not(feature = "rocksdb"))]

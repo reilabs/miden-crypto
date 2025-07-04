@@ -7,8 +7,8 @@ use rayon::prelude::*;
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, Leaves,
-    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf,
-    SmtProof, SparseMerkleTree, Word,
+    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, SmtProof,
+    SparseMerkleTree, Word,
     concurrent::{
         MutatedSubtreeLeaves, PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
         build_subtree, fetch_sibling_pair, process_sorted_pairs_to_leaves,
@@ -25,9 +25,9 @@ mod subtree;
 use subtree::Subtree;
 
 mod storage;
+pub use storage::{MemoryStorage, SmtStorage, StorageUpdates};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
-pub use storage::{MemoryStorage, SmtStorage, StorageUpdates};
 
 // CONSTANTS
 // ================================================================================================
@@ -105,9 +105,9 @@ impl<S: SmtStorage> LargeSmt<S> {
             .get_root()
             .expect("Failed to get root")
             .unwrap_or(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
-        
+
         let is_empty = !storage.has_leaves().expect("Failed to check if storage has leaves");
-    
+
         // Initialize in-memory cache structure
         let mut in_memory_nodes: Vec<Option<Box<InnerNode>>> = vec![None; NUM_IN_MEMORY_LEAVES];
 
@@ -130,8 +130,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let mut subtree_leaves: Vec<Vec<SubtreeLeaf>> =
             SubtreeLeavesIter::from_leaves(&mut leaf_subtrees).collect();
-        for current_depth in
-            (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
+        for current_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
             let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) =
                 subtree_leaves
@@ -161,7 +160,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             root,
             "Tree reconstruction failed - root mismatch"
         );
-        
+
         Ok(Self {
             root,
             storage: Arc::new(storage),
@@ -528,7 +527,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             let idx = Self::key_to_leaf_index(&key).value();
             // Get leaf
             let entry = leaf_map.entry(idx).or_insert(None);
-        
+
             // New values is empty, handle deletion
             if value == Self::EMPTY_VALUE {
                 if let Some(leaf) = entry {
@@ -552,14 +551,14 @@ impl<S: SmtStorage> LargeSmt<S> {
                             // Key had no previous value, increment entry count
                             entry_count_delta += 1;
                         }
-                    }
+                    },
                     None => {
                         // Leaf does not exist, create it
                         *entry = Some(SmtLeaf::Single((key, value)));
                         // Increment both entry and leaf count
                         entry_count_delta += 1;
                         leaf_count_delta += 1;
-                    }
+                    },
                 }
             }
         }
@@ -898,9 +897,7 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         _root: Word,
     ) -> Result<Self, MerkleError> {
         // This method is not supported
-        panic!(
-            "LargeSmt::from_raw_parts is not supported"
-        );
+        panic!("LargeSmt::from_raw_parts is not supported");
     }
 
     fn root(&self) -> Word {
@@ -1037,12 +1034,11 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         // cache subtrees in memory
         let mut cache = UnorderedMap::<NodeIndex, Subtree>::new();
         for &root in &subtree_roots {
-            let subtree = match self.storage.get_subtree(root)
-                .expect("storage error fetching subtree")
-            {
-                Some(st) => st,
-                None     => Subtree::new(root),
-            };
+            let subtree =
+                match self.storage.get_subtree(root).expect("storage error fetching subtree") {
+                    Some(st) => st,
+                    None => Subtree::new(root),
+                };
             cache.insert(root, subtree);
         }
         let mut path = Vec::with_capacity(idx.depth() as usize);

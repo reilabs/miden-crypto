@@ -2,9 +2,7 @@ use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand::{Rng, prelude::IteratorRandom, rng};
 
-use super::{
-    EMPTY_WORD, InnerNodeInfo, LargeSmt, LeafIndex, SMT_DEPTH, SmtLeaf, SmtStorage, Word,
-};
+use super::{EMPTY_WORD, InnerNodeInfo, LargeSmt, LeafIndex, SMT_DEPTH, SmtLeaf, SmtStorage, Word};
 use crate::{
     Felt, ONE, WORD_SIZE,
     merkle::smt::full::{Smt, concurrent::COLS_PER_SUBTREE},
@@ -95,8 +93,7 @@ pub fn equivalent_entry_sets<S: SmtStorage>(storage: S) {
     let entries = generate_entries(1000);
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
-    let mut entries_control_smt_owned: Vec<(Word, Word)> =
-        control_smt.entries().copied().collect();
+    let mut entries_control_smt_owned: Vec<(Word, Word)> = control_smt.entries().copied().collect();
     let mut entries_large_smt: Vec<(Word, Word)> = large_smt.entries().collect();
 
     entries_control_smt_owned.sort_by_key(|k| k.0);
@@ -328,10 +325,8 @@ pub fn mutations_revert<S: SmtStorage>(storage: S) {
     let mut smt = LargeSmt::<S>::new(storage).unwrap();
 
     let key_1: Word = Word::new([ONE, ONE, ONE, Felt::new(1)]);
-    let key_2: Word =
-        Word::new([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(2)]);
-    let key_3: Word =
-        Word::new([0_u32.into(), 0_u32.into(), 0_u32.into(), Felt::new(3)]);
+    let key_2: Word = Word::new([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(2)]);
+    let key_3: Word = Word::new([0_u32.into(), 0_u32.into(), 0_u32.into(), Felt::new(3)]);
 
     let value_1 = Word::new([ONE; WORD_SIZE]);
     let value_2 = Word::new([2_u32.into(); WORD_SIZE]);
@@ -350,5 +345,9 @@ pub fn mutations_revert<S: SmtStorage>(storage: S) {
 
     smt.apply_mutations(revert).unwrap();
 
-    assert_eq!(smt.root(), original_root, "SMT with applied revert mutations did not match original SMT");
+    assert_eq!(
+        smt.root(),
+        original_root,
+        "SMT with applied revert mutations did not match original SMT"
+    );
 }

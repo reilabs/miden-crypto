@@ -112,10 +112,7 @@ pub(crate) fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
         .collect()
 }
 
-pub(crate) fn generate_updates(
-    entries: Vec<(Word, Word)>,
-    updates: usize,
-) -> Vec<(Word, Word)> {
+pub(crate) fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Word)> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
     let mut rng = rng();
     // Assertion to ensure input keys are unique

@@ -227,7 +227,9 @@ impl Smt {
     ///
     /// # Errors
     /// Returns an error if the provided entries contain multiple values for the same key.
-    pub(crate) fn build_subtrees(mut entries: Vec<(Word, Word)>) -> Result<(InnerNodes, Leaves), MerkleError> {
+    pub(crate) fn build_subtrees(
+        mut entries: Vec<(Word, Word)>,
+    ) -> Result<(InnerNodes, Leaves), MerkleError> {
         entries.par_sort_unstable_by_key(|item| {
             let index = Self::key_to_leaf_index(&item.0);
             index.value()

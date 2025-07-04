@@ -22,8 +22,6 @@ mod sparse_path;
 pub use sparse_path::{SparseMerklePath, SparseValuePath};
 
 mod smt;
-#[cfg(feature = "rocksdb")]
-pub use smt::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "internal")]
 pub use smt::test_details;
 pub use smt::{
@@ -32,6 +30,8 @@ pub use smt::{
 };
 #[cfg(feature = "concurrent")]
 pub use smt::{LargeSmt, MemoryStorage};
+#[cfg(feature = "rocksdb")]
+pub use smt::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "internal")]
 pub use smt::{SubtreeLeaf, build_subtree_for_bench};
 
