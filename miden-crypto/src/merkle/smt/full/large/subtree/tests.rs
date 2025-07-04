@@ -1,5 +1,5 @@
 use super::{InnerNode, NodeIndex, SUBTREE_DEPTH, Subtree};
-use crate::merkle::RpoDigest;
+use crate::Word;
 
 #[test]
 fn test_initial_state() {
@@ -21,14 +21,14 @@ fn test_node_operations() {
     // Create test nodes and indices
     let node1_idx = NodeIndex::new(SUBTREE_DEPTH + 1, 0).unwrap();
     let node1 = InnerNode {
-        left: RpoDigest::default(),
-        right: RpoDigest::default(),
+        left: Word::default(),
+        right: Word::default(),
     };
 
     let node2_idx = NodeIndex::new(SUBTREE_DEPTH + 2, 3).unwrap();
     let node2 = InnerNode {
-        left: RpoDigest::from([1u32; 4]),
-        right: RpoDigest::from([2u32; 4]),
+        left: Word::from([1u32; 4]),
+        right: Word::from([2u32; 4]),
     };
 
     // Test insertion into empty subtree
@@ -64,8 +64,8 @@ fn test_node_operations() {
 
     // Test node overwriting
     let node1_updated = InnerNode {
-        left: RpoDigest::from([3u32; 4]),
-        right: RpoDigest::from([4u32; 4]),
+        left: Word::from([3u32; 4]),
+        right: Word::from([4u32; 4]),
     };
     let previous_node = subtree.insert_inner_node(node1_idx, node1_updated.clone());
     assert_eq!(previous_node, Some(node1), "Overwriting should return the previous node");
@@ -144,16 +144,16 @@ fn test_serialize_deserialize_subtree_with_nodes() {
     let node254_idx_global = NodeIndex::new(SUBTREE_DEPTH + 7, 127).unwrap();
 
     let node0 = InnerNode {
-        left: RpoDigest::from([1u32; 4]),
-        right: RpoDigest::from([2u32; 4]),
+        left: Word::from([1u32; 4]),
+        right: Word::from([2u32; 4]),
     };
     let node1 = InnerNode {
-        left: RpoDigest::from([3u32; 4]),
-        right: RpoDigest::from([4u32; 4]),
+        left: Word::from([3u32; 4]),
+        right: Word::from([4u32; 4]),
     };
     let node254 = InnerNode {
-        left: RpoDigest::from([5u32; 4]),
-        right: RpoDigest::from([6u32; 4]),
+        left: Word::from([5u32; 4]),
+        right: Word::from([6u32; 4]),
     };
 
     subtree.insert_inner_node(node0_idx_global, node0.clone());

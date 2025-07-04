@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use super::{
     EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
-    RpoDigest, SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTree, Word, leaf,
+    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTree, Word, leaf,
 };
 use crate::merkle::smt::{NodeMutation, NodeMutations, UnorderedMap};
 
@@ -38,15 +38,36 @@ impl Smt {
     /// # Errors
     /// Returns an error if the provided entries contain multiple values for the same key.
     pub(crate) fn with_entries_concurrent(
-        entries: impl IntoIterator<Item = (RpoDigest, Word)>,
+        entries: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<Self, MerkleError> {
-        let entries: Vec<(RpoDigest, Word)> = entries.into_iter().collect();
+        let entries: Vec<(Word, Word)> = entries.into_iter().collect();
 
         if entries.is_empty() {
             return Ok(Self::default());
         }
 
         let (inner_nodes, leaves) = Self::build_subtrees(entries)?;
+
+        // All the leaves are empty
+        if inner_nodes.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let root = inner_nodes.get(&NodeIndex::root()).unwrap().hash();
+        <Self as SparseMerkleTree<SMT_DEPTH>>::from_raw_parts(inner_nodes, leaves, root)
+    }
+
+    /// Similar to `with_entries_concurrent` but used for pre-sorted entries to avoid overhead.
+    pub(crate) fn with_sorted_entries_concurrent(
+        entries: impl IntoIterator<Item = (Word, Word)>,
+    ) -> Result<Self, MerkleError> {
+        let entries: Vec<(Word, Word)> = entries.into_iter().collect();
+
+        if entries.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let (inner_nodes, leaves) = build_subtrees_from_sorted_entries(entries)?;
 
         // All the leaves are empty
         if inner_nodes.is_empty() {
@@ -73,8 +94,8 @@ impl Smt {
     ///    8 levels up. This continues until reaching the tree's root at depth 0.
     pub(crate) fn compute_mutations_concurrent(
         &self,
-        kv_pairs: impl IntoIterator<Item = (RpoDigest, Word)>,
-    ) -> MutationSet<SMT_DEPTH, RpoDigest, Word>
+        kv_pairs: impl IntoIterator<Item = (Word, Word)>,
+    ) -> MutationSet<SMT_DEPTH, Word, Word>
     where
         Self: Sized + Sync,
     {
@@ -206,9 +227,7 @@ impl Smt {
     ///
     /// # Errors
     /// Returns an error if the provided entries contain multiple values for the same key.
-    pub(crate) fn build_subtrees(
-        mut entries: Vec<(RpoDigest, Word)>,
-    ) -> Result<(InnerNodes, Leaves), MerkleError> {
+    pub(crate) fn build_subtrees(mut entries: Vec<(Word, Word)>) -> Result<(InnerNodes, Leaves), MerkleError> {
         entries.par_sort_unstable_by_key(|item| {
             let index = Self::key_to_leaf_index(&item.0);
             index.value()
@@ -233,7 +252,7 @@ impl Smt {
     /// With debug assertions on, this function panics if it detects that `pairs` is not correctly
     /// sorted. Without debug assertions, the returned computations will be incorrect.
     pub(crate) fn sorted_pairs_to_leaves(
-        pairs: Vec<(RpoDigest, Word)>,
+        pairs: Vec<(Word, Word)>,
     ) -> Result<PairComputations<u64, SmtLeaf>, MerkleError> {
         process_sorted_pairs_to_leaves(pairs, Self::pairs_to_leaf)
     }
@@ -248,7 +267,7 @@ impl Smt {
     /// # Returns
     /// - `Ok(Some(SmtLeaf))` if a valid leaf is constructed.
     /// - `Ok(None)` if the only provided value is `Self::EMPTY_VALUE`.
-    fn pairs_to_leaf(mut pairs: Vec<(RpoDigest, Word)>) -> Result<Option<SmtLeaf>, MerkleError> {
+    fn pairs_to_leaf(mut pairs: Vec<(Word, Word)>) -> Result<Option<SmtLeaf>, MerkleError> {
         assert!(!pairs.is_empty());
 
         if pairs.len() > 1 {
@@ -274,8 +293,8 @@ impl Smt {
     /// Derived from `sorted_pairs_to_leaves`
     fn sorted_pairs_to_mutated_subtree_leaves(
         &self,
-        pairs: Vec<(RpoDigest, Word)>,
-    ) -> (MutatedSubtreeLeaves, UnorderedMap<RpoDigest, Word>) {
+        pairs: Vec<(Word, Word)>,
+    ) -> (MutatedSubtreeLeaves, UnorderedMap<Word, Word>) {
         // Map to track new key-value pairs for mutated leaves
         let mut new_pairs = UnorderedMap::new();
 
@@ -337,7 +356,7 @@ pub struct SubtreeLeaf {
     /// The 'value' field of [`NodeIndex`]. When computing a subtree, the depth is already known.
     pub col: u64,
     /// The hash of the node this `SubtreeLeaf` represents.
-    pub hash: RpoDigest,
+    pub hash: Word,
 }
 
 /// Helper struct to organize the return value of [`Smt::sorted_pairs_to_leaves()`].
@@ -441,18 +460,18 @@ impl Iterator for SubtreeLeavesIter<'_> {
 /// # Panics
 /// This function will panic in debug mode if the input `pairs` are not sorted by column index.
 pub(crate) fn process_sorted_pairs_to_leaves<F>(
-    pairs: Vec<(RpoDigest, Word)>,
+    pairs: Vec<(Word, Word)>,
     mut process_leaf: F,
 ) -> Result<PairComputations<u64, SmtLeaf>, MerkleError>
 where
-    F: FnMut(Vec<(RpoDigest, Word)>) -> Result<Option<SmtLeaf>, MerkleError>,
+    F: FnMut(Vec<(Word, Word)>) -> Result<Option<SmtLeaf>, MerkleError>,
 {
     debug_assert!(pairs.is_sorted_by_key(|(key, _)| Smt::key_to_leaf_index(key).value()));
     let mut accumulator: PairComputations<u64, SmtLeaf> = Default::default();
     // As we iterate, we'll keep track of the kv-pairs we've seen so far that correspond to a
     // single leaf. When we see a pair that's in a different leaf, we'll swap these pairs
     // out and store them in our accumulated leaves.
-    let mut current_leaf_buffer: Vec<(RpoDigest, Word)> = Default::default();
+    let mut current_leaf_buffer: Vec<(Word, Word)> = Default::default();
     let mut iter = pairs.into_iter().peekable();
     while let Some((key, value)) = iter.next() {
         let col = Smt::key_to_leaf_index(&key).index.value();
@@ -509,7 +528,7 @@ where
 /// # Errors
 /// Returns an error if the provided entries contain multiple values for the same key.
 fn build_subtrees_from_sorted_entries(
-    entries: Vec<(RpoDigest, Word)>,
+    entries: Vec<(Word, Word)>,
 ) -> Result<(InnerNodes, Leaves), MerkleError> {
     let mut accumulated_nodes: InnerNodes = Default::default();
     let PairComputations {

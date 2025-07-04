@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, Leaves,
-    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, RpoDigest, SMT_DEPTH, Smt, SmtLeaf,
+    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf,
     SmtProof, SparseMerkleTree, Word,
     concurrent::{
         MutatedSubtreeLeaves, PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
@@ -78,7 +78,7 @@ const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
 /// synchronization for writes.
 #[derive(Debug)]
 pub struct LargeSmt<S: SmtStorage> {
-    root: RpoDigest,
+    root: Word,
     storage: Arc<S>,
     in_memory_nodes: Vec<Option<Box<InnerNode>>>,
 }
@@ -180,9 +180,9 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Returns an error if the provided entries contain multiple values for the same key.
     pub fn with_entries(
         storage: S,
-        entries: impl IntoIterator<Item = (RpoDigest, Word)>,
+        entries: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<Self, MerkleError> {
-        let entries: Vec<(RpoDigest, Word)> = entries.into_iter().collect();
+        let entries: Vec<(Word, Word)> = entries.into_iter().collect();
 
         if storage.has_leaves().expect("Failed to check if storage has leaves") {
             panic!("Cannot create SMT with non-empty storage");
@@ -204,7 +204,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns the root of the tree
-    pub fn root(&self) -> RpoDigest {
+    pub fn root(&self) -> Word {
         <Self as SparseMerkleTree<SMT_DEPTH>>::root(self)
     }
 
@@ -234,18 +234,18 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns the leaf to which `key` maps
-    pub fn get_leaf(&self, key: &RpoDigest) -> SmtLeaf {
+    pub fn get_leaf(&self, key: &Word) -> SmtLeaf {
         <Self as SparseMerkleTree<SMT_DEPTH>>::get_leaf(self, key)
     }
 
     /// Returns the value associated with `key`
-    pub fn get_value(&self, key: &RpoDigest) -> Word {
+    pub fn get_value(&self, key: &Word) -> Word {
         <Self as SparseMerkleTree<SMT_DEPTH>>::get_value(self, key)
     }
 
     /// Returns an opening of the leaf associated with `key`. Conceptually, an opening is a Merkle
     /// path to the leaf, as well as the leaf itself.
-    pub fn open(&self, key: &RpoDigest) -> SmtProof {
+    pub fn open(&self, key: &Word) -> SmtProof {
         <Self as SparseMerkleTree<SMT_DEPTH>>::open(self, key)
     }
 
@@ -268,13 +268,13 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns an iterator over the key-value pairs of this [Smt].
-    /// Note: This iterator returns owned (RpoDigest, Word) tuples.
-    pub fn entries(&self) -> impl Iterator<Item = (RpoDigest, Word)> {
+    /// Note: This iterator returns owned (Word, Word) tuples.
+    pub fn entries(&self) -> impl Iterator<Item = (Word, Word)> {
         self.leaves() // Item = (LeafIndex<SMT_DEPTH>, SmtLeaf)
-            .flat_map(|(_, leaf)| { // leaf is SmtLeaf (owned)
-                // Collect the (RpoDigest, Word) tuples into an owned Vec
+            .flat_map(|(_, leaf)| {
+                // Collect the (Word, Word) tuples into an owned Vec
                 // This ensures they outlive the 'leaf' from which they are derived.
-                let owned_entries: Vec<(RpoDigest, Word)> =
+                let owned_entries: Vec<(Word, Word)> =
                     leaf.entries().into_iter().copied().collect();
                 // Return an iterator over this owned Vec
                 owned_entries.into_iter()
@@ -295,7 +295,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     ///
     /// This also recomputes all hashes between the leaf (associated with the key) and the root,
     /// updating the root itself.
-    pub fn insert(&mut self, key: RpoDigest, value: Word) -> Word {
+    pub fn insert(&mut self, key: Word, value: Word) -> Word {
         <Self as SparseMerkleTree<SMT_DEPTH>>::insert(self, key, value)
     }
 
@@ -310,10 +310,10 @@ impl<S: SmtStorage> LargeSmt<S> {
     ///
     /// # Example
     /// ```
-    /// # use miden_crypto::{hash::rpo::RpoDigest, Felt, Word};
+    /// # use miden_crypto::{Felt, Word};
     /// # use miden_crypto::merkle::{Smt, EmptySubtreeRoots, SMT_DEPTH};
     /// let mut smt = Smt::new();
-    /// let pair = (RpoDigest::default(), Word::default());
+    /// let pair = (Word::default(), Word::default());
     /// let mutations = smt.compute_mutations(vec![pair]);
     /// assert_eq!(mutations.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
     /// smt.apply_mutations(mutations);
@@ -321,8 +321,8 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// ```
     pub fn compute_mutations(
         &self,
-        kv_pairs: impl IntoIterator<Item = (RpoDigest, Word)>,
-    ) -> MutationSet<SMT_DEPTH, RpoDigest, Word>
+        kv_pairs: impl IntoIterator<Item = (Word, Word)>,
+    ) -> MutationSet<SMT_DEPTH, Word, Word>
     where
         Self: Sized + Sync,
     {
@@ -421,7 +421,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// this tree.
     pub fn apply_mutations(
         &mut self,
-        mutations: MutationSet<SMT_DEPTH, RpoDigest, Word>,
+        mutations: MutationSet<SMT_DEPTH, Word, Word>,
     ) -> Result<(), MerkleError> {
         use NodeMutation::*;
         use rayon::prelude::*;
@@ -589,8 +589,8 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// this tree.
     pub fn apply_mutations_with_reversion(
         &mut self,
-        mutations: MutationSet<SMT_DEPTH, RpoDigest, Word>,
-    ) -> Result<MutationSet<SMT_DEPTH, RpoDigest, Word>, MerkleError>
+        mutations: MutationSet<SMT_DEPTH, Word, Word>,
+    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, MerkleError>
     where
         Self: Sized,
     {
@@ -642,7 +642,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
-    fn build_subtrees(&mut self, mut entries: Vec<(RpoDigest, Word)>) -> Result<(), MerkleError> {
+    fn build_subtrees(&mut self, mut entries: Vec<(Word, Word)>) -> Result<(), MerkleError> {
         entries.par_sort_unstable_by_key(|item| {
             let index = Self::key_to_leaf_index(&item.0);
             index.value()
@@ -653,7 +653,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
     fn build_subtrees_from_sorted_entries(
         &mut self,
-        entries: Vec<(RpoDigest, Word)>,
+        entries: Vec<(Word, Word)>,
     ) -> Result<(), MerkleError> {
         let PairComputations {
             leaves: mut leaf_subtrees,
@@ -750,9 +750,9 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Derived from `sorted_pairs_to_leaves`
     fn sorted_pairs_to_mutated_leaves_with_preloaded_leaves(
         &self,
-        pairs: Vec<(RpoDigest, Word)>,
+        pairs: Vec<(Word, Word)>,
         leaf_map: UnorderedMap<u64, SmtLeaf>,
-    ) -> (MutatedSubtreeLeaves, UnorderedMap<RpoDigest, Word>) {
+    ) -> (MutatedSubtreeLeaves, UnorderedMap<Word, Word>) {
         // Map to track new key-value pairs for mutated leaves
         let mut new_pairs = UnorderedMap::new();
 
@@ -884,18 +884,18 @@ impl<S: SmtStorage> LargeSmt<S> {
 }
 
 impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
-    type Key = RpoDigest;
+    type Key = Word;
     type Value = Word;
     type Leaf = SmtLeaf;
     type Opening = SmtProof;
 
     const EMPTY_VALUE: Self::Value = EMPTY_WORD;
-    const EMPTY_ROOT: RpoDigest = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
+    const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
     fn from_raw_parts(
         _inner_nodes: InnerNodes,
         _leaves: Leaves,
-        _root: RpoDigest,
+        _root: Word,
     ) -> Result<Self, MerkleError> {
         // This method is not supported
         panic!(
@@ -903,11 +903,11 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         );
     }
 
-    fn root(&self) -> RpoDigest {
+    fn root(&self) -> Word {
         self.root
     }
 
-    fn set_root(&mut self, root: RpoDigest) {
+    fn set_root(&mut self, root: Word) {
         self.root = root;
         self.storage.set_root(root).expect("Failed to set root");
     }
@@ -985,25 +985,25 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         }
     }
 
-    fn get_leaf(&self, key: &RpoDigest) -> Self::Leaf {
+    fn get_leaf(&self, key: &Word) -> Self::Leaf {
         let leaf_pos = LeafIndex::<SMT_DEPTH>::from(*key).value();
         match self.storage.get_leaf(leaf_pos) {
             Ok(Some(leaf)) => leaf,
-            Ok(None) => SmtLeaf::new_empty(key.into()),
+            Ok(None) => SmtLeaf::new_empty((*key).into()),
             Err(e) => {
                 panic!("Storage error during get_leaf in get_leaf: {:?}", e);
             },
         }
     }
 
-    fn hash_leaf(leaf: &Self::Leaf) -> RpoDigest {
+    fn hash_leaf(leaf: &Self::Leaf) -> Word {
         leaf.hash()
     }
 
     fn construct_prospective_leaf(
         &self,
         mut existing_leaf: SmtLeaf,
-        key: &RpoDigest,
+        key: &Word,
         value: &Word,
     ) -> SmtLeaf {
         debug_assert_eq!(existing_leaf.index(), Self::key_to_leaf_index(key));
@@ -1025,7 +1025,7 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
     fn open(&self, key: &Self::Key) -> Self::Opening {
         let leaf = self.get_leaf(key);
 
-        let mut idx: NodeIndex = LeafIndex::from(key).into();
+        let mut idx: NodeIndex = LeafIndex::from(*key).into();
 
         let subtree_roots: Vec<NodeIndex> = (0..NUM_SUBTREE_LEVELS)
             .scan(idx.parent(), |cursor, _| {
@@ -1071,7 +1071,7 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         Self::path_and_leaf_to_opening(merkle_path, leaf)
     }
 
-    fn key_to_leaf_index(key: &RpoDigest) -> LeafIndex<SMT_DEPTH> {
+    fn key_to_leaf_index(key: &Word) -> LeafIndex<SMT_DEPTH> {
         let most_significant_felt = key[3];
         LeafIndex::new_max_depth(most_significant_felt.as_int())
     }

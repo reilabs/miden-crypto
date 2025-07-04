@@ -12,7 +12,7 @@ use super::{SmtStorage, StorageError, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
-        InnerNode, NodeIndex, RpoDigest, SmtLeaf,
+        InnerNode, NodeIndex, SmtLeaf,
         smt::{
             UnorderedMap,
             full::large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
@@ -241,12 +241,12 @@ impl SmtStorage for RocksDbStorage {
     ///   occurs.
     /// - `StorageError::DeserializationError`: If the retrieved root hash bytes cannot be
     ///   deserialized.
-    fn get_root(&self) -> Result<Option<RpoDigest>, StorageError> {
+    fn get_root(&self) -> Result<Option<Word>, StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
         match self.db.get_cf(cf, ROOT_KEY)?
         {
             Some(bytes) => {
-                let digest = RpoDigest::read_from_bytes(&bytes)?;
+                let digest = Word::read_from_bytes(&bytes)?;
                 Ok(Some(digest))
             },
             None => Ok(None),
@@ -258,7 +258,7 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::BackendError`: If the metadata column family is missing or a RocksDB error
     ///   occurs.
-    fn set_root(&self, root: RpoDigest) -> Result<(), StorageError> {
+    fn set_root(&self, root: Word) -> Result<(), StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
         self.db.put_cf(cf, ROOT_KEY, root.to_bytes())?;
         Ok(())
@@ -325,7 +325,7 @@ impl SmtStorage for RocksDbStorage {
     fn insert_value(
         &self,
         index: u64,
-        key: RpoDigest,
+        key: Word,
         value: Word,
     ) -> Result<Option<Word>, StorageError> {
         debug_assert_ne!(value, EMPTY_WORD);
@@ -395,7 +395,7 @@ impl SmtStorage for RocksDbStorage {
     /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
     /// - `StorageError::SerializationError`: If an updated leaf (if not deleted) cannot be
     ///   serialized.
-    fn remove_value(&self, index: u64, key: RpoDigest) -> Result<Option<Word>, StorageError> {
+    fn remove_value(&self, index: u64, key: Word) -> Result<Option<Word>, StorageError> {
         let Some(mut leaf) = self.get_leaf(index)? else {
             return Ok(None);
         };
@@ -965,7 +965,7 @@ impl SmtStorage for RocksDbStorage {
     /// - `StorageError::BackendError`: If the depth24 column family is missing or a RocksDB
     ///   error occurs.
     /// - `StorageError::DeserializationError`: If any hash bytes are corrupt.
-    fn get_depth24(&self) -> Result<Vec<(u64, RpoDigest)>, StorageError> {
+    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
         let cf = self.cf_handle(DEPTH_24_CF)?;
         let iter = self.db.iterator_cf(cf, IteratorMode::Start);
         let mut hashes = Vec::new();
@@ -974,7 +974,7 @@ impl SmtStorage for RocksDbStorage {
             let (key_bytes, value_bytes) = item?;
 
             let index = index_from_key_bytes(&key_bytes)?;
-            let hash = RpoDigest::read_from_bytes(&value_bytes)?;
+            let hash = Word::read_from_bytes(&value_bytes)?;
 
             hashes.push((index, hash));
         }
@@ -1134,6 +1134,8 @@ impl RocksDbConfig {
     ///
     /// # Examples
     /// ```
+    /// use miden_crypto::merkle::RocksDbConfig;
+    ///
     /// let config = RocksDbConfig::new("/path/to/database");
     /// ```
     pub fn new<P: Into<PathBuf>>(path: P) -> Self {
@@ -1154,6 +1156,8 @@ impl RocksDbConfig {
     ///
     /// # Examples
     /// ```
+    /// use miden_crypto::merkle::RocksDbConfig;
+    ///
     /// let config = RocksDbConfig::new("/path/to/database")
     ///     .with_cache_size(2 * 1024 * 1024 * 1024); // 2GB cache
     /// ```
@@ -1172,6 +1176,8 @@ impl RocksDbConfig {
     ///
     /// # Examples
     /// ```
+    /// use miden_crypto::merkle::RocksDbConfig;
+    ///
     /// let config = RocksDbConfig::new("/path/to/database")
     ///     .with_max_open_files(1024); // Allow up to 1024 open files
     /// ```

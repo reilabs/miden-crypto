@@ -8,7 +8,7 @@ use miden_crypto::merkle::{RocksDbConfig, RocksDbStorage};
 
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
-    hash::rpo::{Rpo256, RpoDigest},
+    hash::rpo::Rpo256,
     merkle::{LargeSmt, MerkleError},
 };
 use rand::{Rng, prelude::IteratorRandom, rng};
@@ -21,16 +21,16 @@ type Storage = RocksDbStorage;
 type Storage = MemoryStorage;
 
 #[derive(Parser, Debug)]
-#[clap(name = "Benchmark", about = "SMT benchmark", version, rename_all = "kebab-case")]
+#[command(name = "Benchmark", about = "SMT benchmark", version, rename_all = "kebab-case")]
 pub struct BenchmarkCmd {
     /// Size of the tree
-    #[clap(short = 's', long = "size", default_value = "1000000")]
+    #[arg(short = 's', long = "size", default_value = "1000000")]
     size: usize,
     /// Number of insertions
-    #[clap(short = 'i', long = "insertions", default_value = "10000")]
+    #[arg(short = 'i', long = "insertions", default_value = "10000")]
     insertions: usize,
     /// Number of updates
-    #[clap(short = 'u', long = "updates", default_value = "10000")]
+    #[arg(short = 'u', long = "updates", default_value = "10000")]
     updates: usize,
     /// Path for the benchmark database
     #[clap(short = 'p', long = "path")]
@@ -66,8 +66,8 @@ pub fn benchmark_smt() {
     // prepare the `leaves` vector for tree creation
     let mut entries = Vec::new();
     for i in 0..tree_size {
-        let key = rand_value::<RpoDigest>();
-        let value = [ONE, ONE, ONE, Felt::new(i as u64)];
+        let key = rand_value::<Word>();
+        let value = Word::new([ONE, ONE, ONE, Felt::new(i as u64)]);
         entries.push((key, value));
     }
 
@@ -86,7 +86,7 @@ pub fn benchmark_smt() {
 
 /// Runs the construction benchmark for [`Smt`], returning the constructed tree.
 pub fn construction(
-    entries: Vec<(RpoDigest, Word)>,
+    entries: Vec<(Word, Word)>,
     size: usize,
     database_path: Option<PathBuf>,
 ) -> Result<LargeSmt<Storage>, MerkleError> {
@@ -119,7 +119,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
 
     for i in 0..insertions {
         let test_key = Rpo256::hash(&rand_value::<u64>().to_be_bytes());
-        let test_value = [ONE, ONE, ONE, Felt::new((size + i) as u64)];
+        let test_value = Word::new([ONE, ONE, ONE, Felt::new((size + i) as u64)]);
 
         let now = Instant::now();
         tree.insert(test_key, test_value);
@@ -144,10 +144,10 @@ pub fn batched_insertion(
 
     let size = tree.num_leaves();
 
-    let new_pairs: Vec<(RpoDigest, Word)> = (0..insertions)
+    let new_pairs: Vec<(Word, Word)> = (0..insertions)
         .map(|i| {
             let key = Rpo256::hash(&rand_value::<u64>().to_be_bytes());
-            let value = [ONE, ONE, ONE, Felt::new((size + i) as u64)];
+            let value = Word::new([ONE, ONE, ONE, Felt::new((size + i) as u64)]);
             (key, value)
         })
         .collect();
@@ -184,7 +184,7 @@ pub fn batched_insertion(
 
 pub fn batched_update(
     tree: &mut LargeSmt<Storage>,
-    entries: Vec<(RpoDigest, Word)>,
+    entries: Vec<(Word, Word)>,
     updates: usize,
 ) -> Result<(), MerkleError> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
@@ -203,7 +203,7 @@ pub fn batched_update(
                 let value = if rng.random_bool(REMOVAL_PROBABILITY) {
                     EMPTY_WORD
                 } else {
-                    [ONE, ONE, ONE, Felt::new(rng.random())]
+                    Word::new([ONE, ONE, ONE, Felt::new(rng.random())])
                 };
 
                 (key, value)

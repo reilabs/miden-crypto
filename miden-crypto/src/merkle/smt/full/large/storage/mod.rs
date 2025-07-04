@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     Word,
     merkle::{
-        NodeIndex, RpoDigest, SmtLeaf,
+        NodeIndex, SmtLeaf,
         smt::{
             UnorderedMap,
             full::{InnerNode, large::subtree::Subtree},
@@ -68,7 +68,7 @@ pub struct StorageUpdates {
 
     /// The new root hash of the SMT that should be persisted after applying
     /// all `leaf_updates` and `subtree_updates`.
-    new_root: RpoDigest,
+    new_root: Word,
 
     /// The net change in the total count of non-empty leaves resulting from this batch of updates.
     /// For example, if one leaf is added and one is removed, this would be 0.
@@ -85,7 +85,7 @@ impl StorageUpdates {
     ///
     /// This constructor is ideal for incremental building where you'll add updates
     /// one by one using the convenience methods like `insert_leaf()` and `insert_subtree()`.
-    pub fn new(new_root: RpoDigest) -> Self {
+    pub fn new(new_root: Word) -> Self {
         Self { new_root, ..Default::default() }
     }
 
@@ -97,7 +97,7 @@ impl StorageUpdates {
     pub fn from_parts(
         leaf_updates: UnorderedMap<u64, Option<SmtLeaf>>,
         subtree_updates: UnorderedMap<NodeIndex, Option<Subtree>>,
-        new_root: RpoDigest,
+        new_root: Word,
         leaf_count_delta: isize,
         entry_count_delta: isize,
     ) -> Self {
@@ -157,7 +157,7 @@ impl StorageUpdates {
     }
 
     /// Returns the new root hash.
-    pub fn new_root(&self) -> RpoDigest {
+    pub fn new_root(&self) -> Word {
         self.new_root
     }
 
@@ -213,7 +213,7 @@ impl StorageUpdates {
     ) -> (
         UnorderedMap<u64, Option<SmtLeaf>>,
         UnorderedMap<NodeIndex, Option<Subtree>>,
-        RpoDigest,
+        Word,
         isize,
         isize,
     ) {
@@ -242,13 +242,13 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     ///
     /// # Errors
     /// Returns `StorageError` if the storage read operation fails.
-    fn get_root(&self) -> Result<Option<RpoDigest>, StorageError>;
+    fn get_root(&self) -> Result<Option<Word>, StorageError>;
 
     /// Sets or updates the root hash of the Sparse Merkle Tree.
     ///
     /// # Errors
     /// Returns `StorageError` if the storage write operation fails.
-    fn set_root(&self, root: RpoDigest) -> Result<(), StorageError>;
+    fn set_root(&self, root: Word) -> Result<(), StorageError>;
 
     /// Retrieves the total number of leaf nodes currently stored.
     ///
@@ -276,7 +276,7 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     fn insert_value(
         &self,
         index: u64,
-        key: RpoDigest,
+        key: Word,
         value: Word,
     ) -> Result<Option<Word>, StorageError>;
 
@@ -295,7 +295,7 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     /// # Errors
     /// Returns `StorageError` if the storage operation fails (e.g., backend database error,
     /// write permission issues, serialization failures).
-    fn remove_value(&self, index: u64, key: RpoDigest) -> Result<Option<Word>, StorageError>;
+    fn remove_value(&self, index: u64, key: Word) -> Result<Option<Word>, StorageError>;
 
     /// Retrieves a single SMT leaf node by its logical `index`.
     /// Returns `Ok(None)` if no leaf exists at the given `index`.
@@ -411,5 +411,5 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     ///
     /// The hash cache is automatically maintained by subtree operations - no manual
     /// cache management is required.
-    fn get_depth24(&self) -> Result<Vec<(u64, RpoDigest)>, StorageError>;
+    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError>;
 }

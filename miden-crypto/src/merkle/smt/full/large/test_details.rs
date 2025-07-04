@@ -3,25 +3,25 @@ use alloc::{collections::BTreeSet, vec::Vec};
 use rand::{Rng, prelude::IteratorRandom, rng};
 
 use super::{
-    EMPTY_WORD, InnerNodeInfo, LargeSmt, LeafIndex, RpoDigest, SMT_DEPTH, SmtLeaf, SmtStorage, Word,
+    EMPTY_WORD, InnerNodeInfo, LargeSmt, LeafIndex, SMT_DEPTH, SmtLeaf, SmtStorage, Word,
 };
 use crate::{
     Felt, ONE, WORD_SIZE,
     merkle::smt::full::{Smt, concurrent::COLS_PER_SUBTREE},
 };
 
-pub fn generate_entries(pair_count: u64) -> Vec<(RpoDigest, Word)> {
+pub fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
     (0..pair_count)
         .map(|i| {
             let leaf_index = ((i as f64 / pair_count as f64) * (pair_count as f64)) as u64;
-            let key = RpoDigest::new([ONE, ONE, Felt::new(i), Felt::new(leaf_index)]);
-            let value = [ONE, ONE, ONE, Felt::new(i)];
+            let key = Word::new([ONE, ONE, Felt::new(i), Felt::new(leaf_index)]);
+            let value = Word::new([ONE, ONE, ONE, Felt::new(i)]);
             (key, value)
         })
         .collect()
 }
 
-pub fn generate_updates(entries: Vec<(RpoDigest, Word)>, updates: usize) -> Vec<(RpoDigest, Word)> {
+pub fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Word)> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
     let mut rng = rng();
     // Assertion to ensure input keys are unique
@@ -29,7 +29,7 @@ pub fn generate_updates(entries: Vec<(RpoDigest, Word)>, updates: usize) -> Vec<
         entries.iter().map(|(key, _)| key).collect::<BTreeSet<_>>().len() == entries.len(),
         "Input entries contain duplicate keys!"
     );
-    let mut sorted_entries: Vec<(RpoDigest, Word)> = entries
+    let mut sorted_entries: Vec<(Word, Word)> = entries
         .into_iter()
         .choose_multiple(&mut rng, updates)
         .into_iter()
@@ -37,7 +37,7 @@ pub fn generate_updates(entries: Vec<(RpoDigest, Word)>, updates: usize) -> Vec<
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {
                 EMPTY_WORD
             } else {
-                [ONE, ONE, ONE, Felt::new(rng.random())]
+                Word::new([ONE, ONE, ONE, Felt::new(rng.random())])
             };
             (key, value)
         })
@@ -49,7 +49,7 @@ pub fn generate_updates(entries: Vec<(RpoDigest, Word)>, updates: usize) -> Vec<
 
 pub fn create_equivalent_smts_for_testing<S: SmtStorage>(
     storage: S,
-    entries: Vec<(RpoDigest, Word)>,
+    entries: Vec<(Word, Word)>,
 ) -> (Smt, LargeSmt<S>) {
     let control_smt = Smt::with_entries(entries.clone()).unwrap();
     let large_smt = LargeSmt::<S>::with_entries(storage, entries).unwrap();
@@ -57,11 +57,11 @@ pub fn create_equivalent_smts_for_testing<S: SmtStorage>(
 }
 
 pub fn smt_get_value<S: SmtStorage>(storage: S) {
-    let key_1: RpoDigest = RpoDigest::from([ONE, ONE, ONE, ONE]);
-    let key_2: RpoDigest = RpoDigest::from([2_u32, 2_u32, 2_u32, 2_u32]);
+    let key_1: Word = Word::from([ONE, ONE, ONE, ONE]);
+    let key_2: Word = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
 
-    let value_1 = [ONE; WORD_SIZE];
-    let value_2 = [2_u32.into(); WORD_SIZE];
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([2_u32.into(); WORD_SIZE]);
     let smt = LargeSmt::<S>::with_entries(storage, [(key_1, value_1), (key_2, value_2)]).unwrap();
 
     let returned_value_1 = smt.get_value(&key_1);
@@ -71,7 +71,7 @@ pub fn smt_get_value<S: SmtStorage>(storage: S) {
     assert_eq!(value_2, returned_value_2);
 
     // Check that a key with no inserted value returns the empty word
-    let key_no_value = RpoDigest::from([42_u32, 42_u32, 42_u32, 42_u32]);
+    let key_no_value = Word::from([42_u32, 42_u32, 42_u32, 42_u32]);
 
     assert_eq!(EMPTY_WORD, smt.get_value(&key_no_value));
 }
@@ -95,9 +95,9 @@ pub fn equivalent_entry_sets<S: SmtStorage>(storage: S) {
     let entries = generate_entries(1000);
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
-    let mut entries_control_smt_owned: Vec<(RpoDigest, Word)> =
+    let mut entries_control_smt_owned: Vec<(Word, Word)> =
         control_smt.entries().copied().collect();
-    let mut entries_large_smt: Vec<(RpoDigest, Word)> = large_smt.entries().collect();
+    let mut entries_large_smt: Vec<(Word, Word)> = large_smt.entries().collect();
 
     entries_control_smt_owned.sort_by_key(|k| k.0);
     entries_large_smt.sort_by_key(|k| k.0);
@@ -162,7 +162,7 @@ pub fn empty_smt<S: SmtStorage>(storage: S) {
     let empty_control_smt = Smt::new();
     assert_eq!(large_smt.root(), empty_control_smt.root(), "Empty SMT root mismatch");
 
-    let random_key = RpoDigest::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
+    let random_key = Word::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     assert_eq!(
         large_smt.get_value(&random_key),
         EMPTY_WORD,
@@ -175,8 +175,8 @@ pub fn empty_smt<S: SmtStorage>(storage: S) {
 }
 
 pub fn single_entry_smt<S: SmtStorage>(storage: S) {
-    let key = RpoDigest::from([ONE, ONE, ONE, ONE]);
-    let value = [ONE; WORD_SIZE];
+    let key = Word::new([ONE, ONE, ONE, ONE]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
     // Create SMT with a single entry
     let mut smt = LargeSmt::<S>::with_entries(storage, [(key, value)]).unwrap();
@@ -189,7 +189,7 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
     assert_eq!(smt.get_value(&key), value, "get_value for existing key failed");
 
     // Check get_value for a non-existing key
-    let other_key = RpoDigest::from([2_u32, 2_u32, 2_u32, 2_u32]);
+    let other_key = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
     assert_eq!(smt.get_value(&other_key), EMPTY_WORD, "get_value for non-existing key failed");
 
     // Check entries iterator
@@ -198,7 +198,7 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
     assert_eq!(entries[0], (key, value), "Single entry SMT entry mismatch");
 
     // Update the entry
-    let new_value = [2_u32.into(); WORD_SIZE];
+    let new_value = Word::new([2_u32.into(); WORD_SIZE]);
     let mutations = smt.compute_mutations(vec![(key, new_value)]);
 
     // test opening before mutations
@@ -232,9 +232,9 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
 }
 
 pub fn duplicate_key_insertion<S: SmtStorage>(storage: S) {
-    let key = RpoDigest::from([ONE, ONE, ONE, ONE]);
-    let value1 = [ONE; WORD_SIZE];
-    let value2 = [2_u32.into(); WORD_SIZE];
+    let key = Word::from([ONE, ONE, ONE, ONE]);
+    let value1 = Word::new([ONE; WORD_SIZE]);
+    let value2 = Word::new([2_u32.into(); WORD_SIZE]);
 
     let entries = vec![(key, value1), (key, value2)];
 
@@ -243,12 +243,12 @@ pub fn duplicate_key_insertion<S: SmtStorage>(storage: S) {
 }
 
 pub fn delete_entry<S: SmtStorage>(storage: S) {
-    let key1 = RpoDigest::from([ONE, ONE, ONE, ONE]);
-    let value1 = [ONE; WORD_SIZE];
-    let key2 = RpoDigest::from([2_u32, 2_u32, 2_u32, 2_u32]);
-    let value2 = [2_u32.into(); WORD_SIZE];
-    let key3 = RpoDigest::from([3_u32, 3_u32, 3_u32, 3_u32]);
-    let value3 = [3_u32.into(); WORD_SIZE];
+    let key1 = Word::new([ONE, ONE, ONE, ONE]);
+    let value1 = Word::new([ONE; WORD_SIZE]);
+    let key2 = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
+    let value2 = Word::new([2_u32.into(); WORD_SIZE]);
+    let key3 = Word::from([3_u32, 3_u32, 3_u32, 3_u32]);
+    let value3 = Word::new([3_u32.into(); WORD_SIZE]);
 
     let initial_entries = vec![(key1, value1), (key2, value2), (key3, value3)];
 
@@ -293,8 +293,8 @@ pub fn insert_entry<S: SmtStorage>(storage: S) {
     assert_eq!(large_smt.num_leaves(), control_smt.num_leaves(), "Number of leaves mismatch");
 
     // Generate new key that wasn't in the initial construction
-    let new_key = RpoDigest::from([100_u32, 100_u32, 100_u32, 100_u32]);
-    let new_value = [100_u32.into(); WORD_SIZE];
+    let new_key = Word::from([100_u32, 100_u32, 100_u32, 100_u32]);
+    let new_value = Word::new([100_u32.into(); WORD_SIZE]);
 
     let old_value = large_smt.insert(new_key, new_value);
     let control_old_value = control_smt.insert(new_key, new_value);
@@ -327,15 +327,15 @@ pub fn insert_entry<S: SmtStorage>(storage: S) {
 pub fn mutations_revert<S: SmtStorage>(storage: S) {
     let mut smt = LargeSmt::<S>::new(storage).unwrap();
 
-    let key_1: RpoDigest = RpoDigest::from([ONE, ONE, ONE, Felt::new(1)]);
-    let key_2: RpoDigest =
-        RpoDigest::from([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(2)]);
-    let key_3: RpoDigest =
-        RpoDigest::from([0_u32.into(), 0_u32.into(), 0_u32.into(), Felt::new(3)]);
+    let key_1: Word = Word::new([ONE, ONE, ONE, Felt::new(1)]);
+    let key_2: Word =
+        Word::new([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(2)]);
+    let key_3: Word =
+        Word::new([0_u32.into(), 0_u32.into(), 0_u32.into(), Felt::new(3)]);
 
-    let value_1 = [ONE; WORD_SIZE];
-    let value_2 = [2_u32.into(); WORD_SIZE];
-    let value_3 = [3_u32.into(); WORD_SIZE];
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([2_u32.into(); WORD_SIZE]);
+    let value_3 = Word::new([3_u32.into(); WORD_SIZE]);
 
     smt.insert(key_1, value_1);
     smt.insert(key_2, value_2);

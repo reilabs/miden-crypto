@@ -5,7 +5,7 @@ use super::{SmtStorage, StorageError, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
-        EmptySubtreeRoots, InnerNode, NodeIndex, RpoDigest, SmtLeaf,
+        EmptySubtreeRoots, InnerNode, NodeIndex, SmtLeaf,
         smt::{
             UnorderedMap,
             full::large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
@@ -26,7 +26,7 @@ use crate::{
 ///   strategy.
 #[derive(Debug)]
 pub struct MemoryStorage {
-    pub root: RwLock<RpoDigest>,
+    pub root: RwLock<Word>,
     pub leaves: RwLock<UnorderedMap<u64, SmtLeaf>>,
     pub subtrees: RwLock<UnorderedMap<NodeIndex, Subtree>>,
 }
@@ -68,14 +68,14 @@ impl Clone for MemoryStorage {
 
 impl SmtStorage for MemoryStorage {
     /// Retrieves the current root hash of the Sparse Merkle Tree.
-    fn get_root(&self) -> Result<Option<RpoDigest>, StorageError> {
+    fn get_root(&self) -> Result<Option<Word>, StorageError> {
         Ok(Some(*self.root.read().map_err(|_| {
             StorageError::BackendError("Failed to acquire read lock for root".into())
         })?))
     }
 
     /// Sets the root hash of the Sparse Merkle Tree.
-    fn set_root(&self, root: RpoDigest) -> Result<(), StorageError> {
+    fn set_root(&self, root: Word) -> Result<(), StorageError> {
         *self.root.write().map_err(|_| {
             StorageError::BackendError("Failed to acquire write lock for root".into())
         })? = root;
@@ -120,7 +120,7 @@ impl SmtStorage for MemoryStorage {
     fn insert_value(
         &self,
         index: u64,
-        key: RpoDigest,
+        key: Word,
         value: Word,
     ) -> Result<Option<Word>, StorageError> {
         debug_assert_ne!(value, EMPTY_WORD);
@@ -148,7 +148,7 @@ impl SmtStorage for MemoryStorage {
     ///
     /// # Errors
     /// Returns `StorageError::BackendError` if the write lock for leaves cannot be acquired.
-    fn remove_value(&self, index: u64, key: RpoDigest) -> Result<Option<Word>, StorageError> {
+    fn remove_value(&self, index: u64, key: Word) -> Result<Option<Word>, StorageError> {
         let mut leaves_guard = self.leaves.write().map_err(|_| {
             StorageError::BackendError("Failed to acquire write lock for remove_value".into())
         })?;
@@ -462,7 +462,7 @@ impl SmtStorage for MemoryStorage {
     ///
     /// For MemoryStorage, this returns an empty vector since all data is already in memory
     /// and there's no startup performance benefit to caching depth 24 roots.
-    fn get_depth24(&self) -> Result<Vec<(u64, RpoDigest)>, StorageError> {
+    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
         Ok(Vec::new())
     }
 }
