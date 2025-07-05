@@ -208,7 +208,7 @@ impl ElementHasher for Rpo256 {
         for &element in elements.iter() {
             state[RATE_RANGE.start + i] = element;
             i += 1;
-            if i % RATE_WIDTH == 0 {
+            if i.is_multiple_of(RATE_WIDTH) {
                 Self::apply_permutation(&mut state);
                 i = 0;
             }
