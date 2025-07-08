@@ -4,6 +4,11 @@
 - [BREAKING] Remove generics from `MerkleStore` and remove `KvMap` and `RecordingMap` (#442).
 - Rename `smt_hashmaps` feature to `hashmaps` (#442).
 
+## 0.15.4 (2025-07-07)
+
+- Implemented `LexicographicWord` struct ([#443](https://github.com/0xMiden/crypto/pull/443/)).
+- Added `SequentialCommit` trait ([#443](https://github.com/0xMiden/crypto/pull/443/)).
+
 ## 0.15.3 (2025-06-18)
 
 - Fixed conversion error from a slice of bytes into `Word`.
