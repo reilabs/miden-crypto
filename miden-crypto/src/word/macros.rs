@@ -50,7 +50,11 @@ pub const fn parse_hex_string_as_word(hex: &str) -> Result<[Felt; 4], &'static s
 
         // This digit's nibble offset within the felt. We need to invert the nibbles per
         // byte for endianness reasons i.e. ABCD -> BADC.
-        let inibble = if i % 2 == 0 { (i + 1) % 16 } else { (i - 1) % 16 };
+        let inibble = if i.is_multiple_of(2) {
+            (i + 1) % 16
+        } else {
+            (i - 1) % 16
+        };
 
         let value = hex_digit << (inibble * 4);
         felts[i / 2 / 8] += value;
