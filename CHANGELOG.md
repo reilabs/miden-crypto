@@ -1,4 +1,4 @@
-## 0.15.4 (TBD)
+## 0.15.4 (2025-07-07)
 
 - Implemented `LexicographicWord` struct ([#443](https://github.com/0xMiden/crypto/pull/443/)).
 - Added `SequentialCommit` trait ([#443](https://github.com/0xMiden/crypto/pull/443/)).
