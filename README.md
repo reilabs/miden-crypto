@@ -22,7 +22,7 @@ For performance benchmarks of these hash functions and their comparison to other
 
 [Merkle module](./miden-crypto/src/merkle/) provides a set of data structures related to Merkle trees. All these data structures are implemented using the RPO hash function described above. The data structures are:
 
-- `MerkleStore`: a collection of Merkle trees of different heights designed to efficiently store trees with common subtrees. When instantiated with `RecordingMap`, a Merkle store records all accesses to the original data.
+- `MerkleStore`: a collection of Merkle trees of different heights designed to efficiently store trees with common subtrees.
 - `MerkleTree`: a regular fully-balanced binary Merkle tree. The depth of this tree can be at most 64.
 - `Mmr`: a Merkle mountain range structure designed to function as an append-only log.
 - `PartialMerkleTree`: a partial view of a Merkle tree where some sub-trees may not be known. This is similar to a collection of Merkle paths all resolving to the same root. The length of the paths can be at most 64.
