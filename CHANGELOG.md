@@ -1,5 +1,6 @@
 ## 0.16.0 (TBD)
 
+- Added implementation of Poseidon2 hash function ([#429](https://github.com/0xMiden/crypto/issues/429)).
 - [BREAKING] Incremented MSRV to 1.88.
 - [BREAKING] Remove generics from `MerkleStore` and remove `KvMap` and `RecordingMap` (#442).
 - [BREAKING] Rename `smt_hashmaps` feature to `hashmaps` (#442).
