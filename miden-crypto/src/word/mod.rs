@@ -11,6 +11,7 @@ use core::{
 
 use thiserror::Error;
 use winter_crypto::Digest;
+use winter_math::FieldElement;
 
 const WORD_SIZE_FELT: usize = 4;
 const WORD_SIZE_BYTES: usize = 32;
@@ -49,6 +50,21 @@ impl Word {
     /// Creates a new [Word] from the given field elements.
     pub const fn new(value: [Felt; WORD_SIZE_FELT]) -> Self {
         Self(value)
+    }
+
+    /// Returns a new [Word] consisting of four ZERO elements.
+    pub const fn empty() -> Self {
+        Self([Felt::ZERO; WORD_SIZE_FELT])
+    }
+
+    /// Returns true if the word consists of four ZERO elements.
+    pub const fn is_empty(&self) -> bool {
+        const ZERO_FELT_INNER: u64 = Felt::ZERO.inner();
+
+        self.0[0].inner() == ZERO_FELT_INNER
+            && self.0[1].inner() == ZERO_FELT_INNER
+            && self.0[2].inner() == ZERO_FELT_INNER
+            && self.0[3].inner() == ZERO_FELT_INNER
     }
 
     /// Returns the word as a slice of field elements.
@@ -543,7 +559,7 @@ impl Deserializable for Word {
             let e = source.read_u64()?;
             if e >= Felt::MODULUS {
                 return Err(DeserializationError::InvalidValue(String::from(
-                    "Value not in the appropriate range",
+                    "value not in the appropriate range",
                 )));
             }
             *inner = Felt::new(e);

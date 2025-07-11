@@ -1,3 +1,7 @@
+## 0.15.5 (2025-07-10)
+
+- Added `empty()` and `is_empty()` methods to `Word`.
+
 ## 0.15.4 (2025-07-07)
 
 - Implemented `LexicographicWord` struct ([#443](https://github.com/0xMiden/crypto/pull/443/)).
