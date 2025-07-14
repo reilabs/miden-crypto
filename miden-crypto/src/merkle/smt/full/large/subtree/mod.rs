@@ -1,35 +1,28 @@
 use alloc::vec::Vec;
 
 use super::{InnerNode, InnerNodeInfo, NodeIndex, SUBTREE_DEPTH};
-use crate::{
-    merkle::smt::UnorderedMap,
-    utils::{Deserializable, DeserializationError},
-};
+use crate::utils::{Deserializable, DeserializationError};
 
 #[cfg(test)]
 mod tests;
+
+const MAX_SIZE: usize = (1 << SUBTREE_DEPTH) - 1;
 
 /// Represents a complete 8-depth subtree that can be serialized into a single RocksDB entry.
 #[derive(Debug, Clone)]
 pub struct Subtree {
     root_index: NodeIndex,
-    // Store only non-empty nodes in a map
-    nodes: UnorderedMap<u8, InnerNode>,
-    // Cache for the number of present nodes to optimize serialization
-    present_nodes: usize,
+    nodes: [Option<InnerNode>; MAX_SIZE],
 }
 
 impl Subtree {
-    const DEPTH: usize = 8;
-    const NODE_COUNT: usize = (1 << Self::DEPTH) - 1;
     const NODE_SIZE: usize = 64;
     const BITMASK_SIZE: usize = 32;
 
     pub fn new(root_index: NodeIndex) -> Self {
         Self {
             root_index,
-            nodes: UnorderedMap::new(),
-            present_nodes: 0,
+            nodes: [const { None }; MAX_SIZE],
         }
     }
 
@@ -38,7 +31,7 @@ impl Subtree {
     }
 
     pub fn len(&self) -> usize {
-        self.present_nodes
+        self.nodes.iter().filter(|n| n.is_some()).count()
     }
 
     pub fn insert_inner_node(
@@ -47,44 +40,37 @@ impl Subtree {
         inner_node: InnerNode,
     ) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        let old_value = self.nodes.insert(local_index, inner_node);
-        if old_value.is_none() {
-            self.present_nodes += 1;
-        }
-        old_value
+        self.nodes[local_index as usize].replace(inner_node)
     }
 
     pub fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        let old_value = self.nodes.remove(&local_index);
-        if old_value.is_some() {
-            self.present_nodes -= 1;
-        }
-        old_value
+        self.nodes[local_index as usize].take()
     }
 
     pub fn get_inner_node(&self, index: NodeIndex) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        self.nodes.get(&local_index).cloned()
+        self.nodes[local_index as usize].clone()
     }
 
     pub fn to_vec(&self) -> Vec<u8> {
-        // Pre-allocate the exact size needed
-        let mut buf = Vec::with_capacity(Self::BITMASK_SIZE + self.present_nodes * Self::NODE_SIZE);
-
         // Create and write bitmask
         let mut bitmask = [0u8; Self::BITMASK_SIZE];
-        for &local_index in self.nodes.keys() {
-            bitmask[local_index as usize / 8] |= 1 << (local_index % 8);
+        let mut present_nodes = 0;
+        for (_local_index, node) in self.nodes.iter().enumerate() {
+            if node.is_some() {
+                bitmask[_local_index / 8] |= 1 << (_local_index % 8);
+                present_nodes += 1;
+            }
         }
+        // Pre-allocate the exact size needed
+        let mut buf = Vec::with_capacity(Self::BITMASK_SIZE + present_nodes * Self::NODE_SIZE);
         buf.extend_from_slice(&bitmask);
 
         // Write node data in order
-        for local_index in 0..Self::NODE_COUNT as u8 {
-            if let Some(node) = self.nodes.get(&local_index) {
-                buf.extend_from_slice(&node.left.as_bytes());
-                buf.extend_from_slice(&node.right.as_bytes());
-            }
+        for node in self.nodes.iter().flatten() {
+            buf.extend_from_slice(&node.left.as_bytes());
+            buf.extend_from_slice(&node.right.as_bytes());
         }
 
         buf
@@ -100,7 +86,7 @@ impl Subtree {
             return Err(DeserializationError::InvalidValue("Invalid node data length".into()));
         }
 
-        let mut nodes = UnorderedMap::new();
+        let mut nodes = [const { None }; MAX_SIZE];
         let mut node_data_chunks = node_data.chunks_exact(Self::NODE_SIZE);
         bitmask
             .iter()
@@ -123,7 +109,7 @@ impl Subtree {
                 })?;
 
                 let node = InnerNode::read_from_bytes(node_bytes)?;
-                nodes.insert(local_index, node);
+                nodes[local_index as usize].replace(node);
                 Ok(())
             })?;
 
@@ -134,7 +120,7 @@ impl Subtree {
             ));
         }
 
-        Ok(Self { root_index, nodes, present_nodes })
+        Ok(Self { root_index, nodes })
     }
 
     fn global_to_local(global: NodeIndex, base: NodeIndex) -> u8 {
@@ -145,12 +131,14 @@ impl Subtree {
             global.depth()
         );
 
-        // Calculate the relative position within the subtree
+        // Calculate the relative depth within the subtree
         let relative_depth = global.depth() - base.depth();
-        // The mask to get the relative position bits
+        // Calculate the base offset in a binary tree of given relative depth
+        let base_offset = (1 << relative_depth) - 1;
+        // Mask out the lower `relative_depth` bits to find the local position in the subtree
         let mask = (1 << relative_depth) - 1;
-        // Get the relative position and add the offset for the subtree level
-        ((1 << relative_depth) - 1) + ((global.value() & mask) as u8)
+        let local_position = (global.value() & mask) as u8;
+        base_offset + local_position
     }
 
     pub fn subtree_key(root_index: NodeIndex) -> [u8; 9] {
@@ -174,14 +162,16 @@ impl Subtree {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.present_nodes == 0
+        self.len() == 0
     }
 
     pub fn iter_inner_node_info(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
-        self.nodes.values().map(|inner_node_ref| InnerNodeInfo {
-            value: inner_node_ref.hash(),
-            left: inner_node_ref.left,
-            right: inner_node_ref.right,
+        self.nodes.iter().filter_map(|inner_node_ref| {
+            inner_node_ref.as_ref().map(|inner_node| InnerNodeInfo {
+                value: inner_node.hash(),
+                left: inner_node.left,
+                right: inner_node.right,
+            })
         })
     }
 }

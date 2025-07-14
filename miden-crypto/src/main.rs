@@ -5,11 +5,10 @@ use clap::Parser;
 use miden_crypto::merkle::MemoryStorage;
 #[cfg(feature = "rocksdb")]
 use miden_crypto::merkle::{RocksDbConfig, RocksDbStorage};
-
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
     hash::rpo::Rpo256,
-    merkle::{LargeSmt, MerkleError},
+    merkle::{LargeSmt, LargeSmtError},
 };
 use rand::{Rng, prelude::IteratorRandom, rng};
 use rand_utils::rand_value;
@@ -89,32 +88,32 @@ pub fn construction(
     entries: Vec<(Word, Word)>,
     size: usize,
     database_path: Option<PathBuf>,
-) -> Result<LargeSmt<Storage>, MerkleError> {
+) -> Result<LargeSmt<Storage>, LargeSmtError> {
     println!("Running a construction benchmark:");
     let now = Instant::now();
-    let storage = get_storage(database_path, false);
+    let storage = get_storage(database_path, false)?;
     let tree = LargeSmt::with_entries(storage, entries)?;
     let elapsed = now.elapsed().as_secs_f32();
     println!("Constructed an SMT with {size} key-value pairs in {elapsed:.1} seconds");
-    println!("Number of leaf nodes: {}\n", tree.num_leaves());
+    println!("Number of leaf nodes: {}\n", tree.num_leaves()?);
 
     Ok(tree)
 }
 
-pub fn open_existing(storage_path: Option<PathBuf>) -> Result<LargeSmt<Storage>, MerkleError> {
+pub fn open_existing(storage_path: Option<PathBuf>) -> Result<LargeSmt<Storage>, LargeSmtError> {
     println!("Opening an existing database:");
     let now = Instant::now();
-    let storage = get_storage(storage_path, true);
+    let storage = get_storage(storage_path, true)?;
     let tree = LargeSmt::new(storage)?;
     let elapsed = now.elapsed().as_secs_f32();
     println!("Opened an existing database in {elapsed:.1} seconds");
     Ok(tree)
 }
 /// Runs the insertion benchmark for the [`Smt`].
-pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), MerkleError> {
+pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), LargeSmtError> {
     println!("Running an insertion benchmark:");
 
-    let size = tree.num_leaves();
+    let size = tree.num_leaves()?;
     let mut insertion_times = Vec::new();
 
     for i in 0..insertions {
@@ -139,10 +138,10 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
 pub fn batched_insertion(
     tree: &mut LargeSmt<Storage>,
     insertions: usize,
-) -> Result<(), MerkleError> {
+) -> Result<(), LargeSmtError> {
     println!("Running a batched insertion benchmark:");
 
-    let size = tree.num_leaves();
+    let size = tree.num_leaves()?;
 
     let new_pairs: Vec<(Word, Word)> = (0..insertions)
         .map(|i| {
@@ -153,7 +152,7 @@ pub fn batched_insertion(
         .collect();
 
     let now = Instant::now();
-    let mutations = tree.compute_mutations(new_pairs);
+    let mutations = tree.compute_mutations(new_pairs)?;
     let compute_elapsed = now.elapsed().as_secs_f64() * 1000_f64; // time in ms
 
     println!(
@@ -186,12 +185,12 @@ pub fn batched_update(
     tree: &mut LargeSmt<Storage>,
     entries: Vec<(Word, Word)>,
     updates: usize,
-) -> Result<(), MerkleError> {
+) -> Result<(), LargeSmtError> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
 
     println!("Running a batched update benchmark:");
 
-    let size = tree.num_leaves();
+    let size = tree.num_leaves()?;
     let mut rng = rng();
 
     let new_pairs =
@@ -212,7 +211,7 @@ pub fn batched_update(
     assert_eq!(new_pairs.len(), updates);
 
     let now = Instant::now();
-    let mutations = tree.compute_mutations(new_pairs);
+    let mutations = tree.compute_mutations(new_pairs)?;
     let compute_elapsed = now.elapsed().as_secs_f64() * 1000_f64; // time in ms
 
     let now = Instant::now();
@@ -242,17 +241,17 @@ pub fn batched_update(
 }
 
 /// Runs the proof generation benchmark for the [`Smt`].
-pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), MerkleError> {
+pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtError> {
     const NUM_PROOFS: usize = 100;
 
     println!("Running a proof generation benchmark:");
 
     let mut opening_times = Vec::new();
-    let size = tree.num_leaves();
+    let size = tree.num_leaves()?;
 
     // fetch keys already in the tree to be opened
     let keys = tree
-        .leaves()
+        .leaves()?
         .take(NUM_PROOFS)
         .map(|(_, leaf)| leaf.entries()[0].0)
         .collect::<Vec<_>>();
@@ -273,7 +272,7 @@ pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), MerkleError>
 }
 
 #[cfg(feature = "rocksdb")]
-fn get_storage(database_path: Option<PathBuf>, open: bool) -> Storage {
+fn get_storage(database_path: Option<PathBuf>, open: bool) -> Result<Storage, LargeSmtError> {
     let path = database_path.unwrap_or_else(|| std::env::temp_dir().join("miden_crypto_benchmark"));
     println!("Using database path: {}", path.display());
     if !open {
@@ -283,11 +282,12 @@ fn get_storage(database_path: Option<PathBuf>, open: bool) -> Storage {
         }
         std::fs::create_dir_all(path.clone()).expect("Failed to create database directory");
     }
-    Storage::open(RocksDbConfig::new(path).with_cache_size(1 << 30).with_max_open_files(1024))
-        .expect("Failed to open database")
+    Ok(Storage::open(
+        RocksDbConfig::new(path).with_cache_size(1 << 30).with_max_open_files(1024),
+    )?)
 }
 
 #[cfg(not(feature = "rocksdb"))]
-fn get_storage(_database_path: Option<PathBuf>, _open: bool) -> Storage {
-    Storage::new()
+fn get_storage(_database_path: Option<PathBuf>, _open: bool) -> Result<Storage, LargeSmtError> {
+    Ok(Storage::new())
 }

@@ -10,7 +10,7 @@ use crate::{EMPTY_WORD, Felt, Word, hash::rpo::Rpo256};
 
 mod full;
 #[cfg(feature = "concurrent")]
-pub use full::{LargeSmt, MemoryStorage};
+pub use full::{LargeSmt, LargeSmtError, MemoryStorage};
 #[cfg(feature = "rocksdb")]
 pub use full::{RocksDbConfig, RocksDbStorage};
 pub use full::{SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};

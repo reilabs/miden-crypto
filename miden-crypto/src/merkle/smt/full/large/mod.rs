@@ -1,6 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::mem;
-use std::sync::Arc;
 
 use num::Integer;
 use rayon::prelude::*;
@@ -16,6 +15,9 @@ use super::{
 };
 use crate::merkle::smt::{NodeMutation, NodeMutations, UnorderedMap};
 
+mod error;
+pub use error::LargeSmtError;
+
 #[cfg(any(test, feature = "internal"))]
 pub mod test_details;
 #[cfg(test)]
@@ -25,7 +27,7 @@ mod subtree;
 use subtree::Subtree;
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, StorageUpdates};
+pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdates};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 
@@ -41,9 +43,14 @@ const NUM_IN_MEMORY_LEAVES: usize = (1 << IN_MEMORY_DEPTH) - 1;
 /// Number of subtree levels below in-memory depth (24-64 in steps of 8)
 const NUM_SUBTREE_LEVELS: usize = 5;
 
-/// Batch size for writing subtrees to storage. This controls how many subtrees are accumulated
-/// before being written to storage in a single batch operation, optimizing I/O performance.
-const SUBTREE_WRITE_BATCH_SIZE: usize = 10_000;
+/// How many subtrees we buffer before flushing them to storage **during the
+/// SMT construction phase**.
+///
+/// * This constant is **only** used while building a fresh tree; incremental updates use their own
+///   per-batch sizing.
+/// * Construction is all-or-nothing: if the write fails we abort and rebuild from scratch, so we
+///   prefer larger batches that maximise I/O throughput instead of fine-grained rollback safety.
+const CONSTRUCTION_SUBTREE_BATCH_SIZE: usize = 10_000;
 /// Subtree depths for the subtrees stored in storage
 const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
 
@@ -71,15 +78,9 @@ const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
 /// The tree structure:
 /// - Depths 0-23: Stored in memory as a flat array for fast access
 /// - Depths 24-64: Stored in external storage organized as subtrees for efficient batch operations
-///
-/// # Thread Safety
-/// `LargeSmt` can be shared between threads if the storage backend `S` implements `Send + Sync`.
-/// The storage is wrapped in an `Arc`, allowing multiple readers but requiring external
-/// synchronization for writes.
 #[derive(Debug)]
 pub struct LargeSmt<S: SmtStorage> {
-    root: Word,
-    storage: Arc<S>,
+    storage: S,
     in_memory_nodes: Vec<Option<Box<InnerNode>>>,
 }
 
@@ -100,27 +101,21 @@ impl<S: SmtStorage> LargeSmt<S> {
     ///
     /// # Errors
     /// Returns an error if fetching the root or initial in-memory nodes from the storage fails.
-    pub fn new(storage: S) -> Result<Self, MerkleError> {
-        let root = storage
-            .get_root()
-            .expect("Failed to get root")
-            .unwrap_or(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+    pub fn new(storage: S) -> Result<Self, LargeSmtError> {
+        let root = storage.get_root()?.unwrap_or(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
 
-        let is_empty = !storage.has_leaves().expect("Failed to check if storage has leaves");
+        let is_empty = !storage.has_leaves()?;
 
         // Initialize in-memory cache structure
         let mut in_memory_nodes: Vec<Option<Box<InnerNode>>> = vec![None; NUM_IN_MEMORY_LEAVES];
 
         // No leaves, return empty tree
         if is_empty {
-            return Ok(Self {
-                root,
-                storage: Arc::new(storage),
-                in_memory_nodes,
-            });
+            return Ok(Self { storage, in_memory_nodes });
         }
 
-        let subtree_roots = storage.get_depth24().expect("Failed to get subtree roots");
+        let subtree_roots = storage.get_depth24()?;
+
         // convert subtree roots to SubtreeLeaf
         let mut leaf_subtrees: Vec<SubtreeLeaf> = subtree_roots
             .into_iter()
@@ -130,6 +125,8 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let mut subtree_leaves: Vec<Vec<SubtreeLeaf>> =
             SubtreeLeavesIter::from_leaves(&mut leaf_subtrees).collect();
+
+        // build in-memory top of the tree
         for current_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
             let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) =
@@ -161,11 +158,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             "Tree reconstruction failed - root mismatch"
         );
 
-        Ok(Self {
-            root,
-            storage: Arc::new(storage),
-            in_memory_nodes,
-        })
+        Ok(Self { storage, in_memory_nodes })
     }
 
     /// Returns a new [Smt] instantiated with leaves set as specified by the provided entries.
@@ -180,13 +173,13 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn with_entries(
         storage: S,
         entries: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<Self, MerkleError> {
+    ) -> Result<Self, LargeSmtError> {
         let entries: Vec<(Word, Word)> = entries.into_iter().collect();
 
-        if storage.has_leaves().expect("Failed to check if storage has leaves") {
+        if storage.has_leaves()? {
             panic!("Cannot create SMT with non-empty storage");
         }
-        let mut tree = LargeSmt::new(storage).expect("Failed to create SMT");
+        let mut tree = LargeSmt::new(storage)?;
         if entries.is_empty() {
             return Ok(tree);
         }
@@ -203,8 +196,8 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns the root of the tree
-    pub fn root(&self) -> Word {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::root(self)
+    pub fn root(&self) -> Result<Word, LargeSmtError> {
+        Ok(self.storage.get_root()?.unwrap_or(Self::EMPTY_ROOT))
     }
 
     /// Returns the number of non-empty leaves in this tree.
@@ -212,10 +205,10 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Note that this may return a different value from [Self::num_entries()] as a single leaf may
     /// contain more than one key-value pair.
     ///
-    /// # Panics
-    /// Panics if there is a storage error when retrieving the leaf count.
-    pub fn num_leaves(&self) -> usize {
-        self.storage.leaf_count().expect("Storage error getting leaf count")
+    /// # Errors
+    /// Returns an error if there is a storage error when retrieving the leaf count.
+    pub fn num_leaves(&self) -> Result<usize, LargeSmtError> {
+        Ok(self.storage.leaf_count()?)
     }
 
     /// Returns the number of key-value pairs with non-default values in this tree.
@@ -226,10 +219,10 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Also note that this is currently an expensive operation is counting the number of entries
     /// requires iterating over all leaves of the tree.
     ///
-    /// # Panics
-    /// Panics if there is a storage error when retrieving the entry count.
-    pub fn num_entries(&self) -> usize {
-        self.storage.entry_count().expect("Storage error getting entry count")
+    /// # Errors
+    /// Returns an error if there is a storage error when retrieving the entry count.
+    pub fn num_entries(&self) -> Result<usize, LargeSmtError> {
+        Ok(self.storage.entry_count()?)
     }
 
     /// Returns the leaf to which `key` maps
@@ -249,9 +242,13 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns a boolean value indicating whether the SMT is empty.
-    pub fn is_empty(&self) -> bool {
-        debug_assert_eq!(self.num_leaves() == 0, self.root == Self::EMPTY_ROOT);
-        self.root == Self::EMPTY_ROOT
+    ///
+    /// # Errors
+    /// Returns an error if there is a storage error when retrieving the root or leaf count.
+    pub fn is_empty(&self) -> Result<bool, LargeSmtError> {
+        let root = self.storage.get_root()?.unwrap_or(Self::EMPTY_ROOT);
+        debug_assert_eq!(self.num_leaves()? == 0, root == Self::EMPTY_ROOT);
+        Ok(root == Self::EMPTY_ROOT)
     }
 
     // ITERATORS
@@ -259,30 +256,40 @@ impl<S: SmtStorage> LargeSmt<S> {
 
     /// Returns an iterator over the leaves of this [Smt].
     /// Note: This iterator returns owned SmtLeaf values.
-    pub fn leaves(&self) -> impl Iterator<Item = (LeafIndex<SMT_DEPTH>, SmtLeaf)> {
-        self.storage
-            .iter_leaves()
-            .expect("Storage error iterating leaves")
-            .map(|(idx, leaf)| (LeafIndex::new_max_depth(idx), leaf))
+    ///
+    /// # Errors
+    /// Returns an error if the storage backend fails to create the iterator.
+    pub fn leaves(
+        &self,
+    ) -> Result<impl Iterator<Item = (LeafIndex<SMT_DEPTH>, SmtLeaf)>, LargeSmtError> {
+        let iter = self.storage.iter_leaves()?;
+        Ok(iter.map(|(idx, leaf)| (LeafIndex::new_max_depth(idx), leaf)))
     }
 
     /// Returns an iterator over the key-value pairs of this [Smt].
     /// Note: This iterator returns owned (Word, Word) tuples.
-    pub fn entries(&self) -> impl Iterator<Item = (Word, Word)> {
-        self.leaves() // Item = (LeafIndex<SMT_DEPTH>, SmtLeaf)
-            .flat_map(|(_, leaf)| {
-                // Collect the (Word, Word) tuples into an owned Vec
-                // This ensures they outlive the 'leaf' from which they are derived.
-                let owned_entries: Vec<(Word, Word)> =
-                    leaf.entries().into_iter().copied().collect();
-                // Return an iterator over this owned Vec
-                owned_entries.into_iter()
-            })
+    ///
+    /// # Errors
+    /// Returns an error if the storage backend fails to create the iterator.
+    pub fn entries(&self) -> Result<impl Iterator<Item = (Word, Word)>, LargeSmtError> {
+        let leaves_iter = self.leaves()?;
+        Ok(leaves_iter.flat_map(|(_, leaf)| {
+            // Collect the (Word, Word) tuples into an owned Vec
+            // This ensures they outlive the 'leaf' from which they are derived.
+            let owned_entries: Vec<(Word, Word)> = leaf.entries().into_iter().copied().collect();
+            // Return an iterator over this owned Vec
+            owned_entries.into_iter()
+        }))
     }
 
     /// Returns an iterator over the inner nodes of this [Smt].
-    pub fn inner_nodes(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
-        LargeSmtInnerNodeIterator::new(self)
+    ///
+    /// # Errors
+    /// Returns an error if the storage backend fails during iteration setup.
+    pub fn inner_nodes(&self) -> Result<impl Iterator<Item = InnerNodeInfo> + '_, LargeSmtError> {
+        // Pre-validate that storage is accessible
+        let _ = self.storage.iter_subtrees()?;
+        Ok(LargeSmtInnerNodeIterator::new(self))
     }
 
     // STATE MUTATORS
@@ -321,7 +328,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn compute_mutations(
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
-    ) -> MutationSet<SMT_DEPTH, Word, Word>
+    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, LargeSmtError>
     where
         Self: Sized + Sync,
     {
@@ -353,13 +360,14 @@ impl<S: SmtStorage> LargeSmt<S> {
             self.sorted_pairs_to_mutated_leaves_with_preloaded_leaves(sorted_kv_pairs, leaf_map);
 
         // If no mutations, return an empty mutation set
+        let old_root = self.root()?;
         if leaves.is_empty() {
-            return MutationSet {
-                old_root: self.root(),
-                new_root: self.root(),
+            return Ok(MutationSet {
+                old_root,
+                new_root: old_root,
                 node_mutations: NodeMutations::default(),
                 new_pairs,
-            };
+            });
         }
 
         let mut node_mutations = NodeMutations::default();
@@ -397,7 +405,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Create mutation set
         let mutation_set = MutationSet {
-            old_root: self.root(),
+            old_root: self.root()?,
             new_root,
             node_mutations,
             new_pairs,
@@ -408,7 +416,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             !mutation_set.node_mutations().is_empty() && !mutation_set.new_pairs().is_empty()
         );
 
-        mutation_set
+        Ok(mutation_set)
     }
 
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree.
@@ -421,7 +429,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
-    ) -> Result<(), MerkleError> {
+    ) -> Result<(), LargeSmtError> {
         use NodeMutation::*;
         use rayon::prelude::*;
         let MutationSet {
@@ -433,11 +441,12 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Guard against accidentally trying to apply mutations that were computed against a
         // different tree, including a stale version of this tree.
-        if old_root != self.root() {
-            return Err(MerkleError::ConflictingRoots {
-                expected_root: self.root(),
+        let expected_root = self.root()?;
+        if old_root != expected_root {
+            return Err(LargeSmtError::Merkle(MerkleError::ConflictingRoots {
+                expected_root,
                 actual_root: old_root,
-            });
+            }));
         }
 
         // Sort mutations
@@ -458,10 +467,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         subtree_roots_indices.dedup();
 
         // Read all subtrees at once
-        let subtrees_from_storage = self
-            .storage
-            .get_subtrees(&subtree_roots_indices)
-            .expect("Failed to get subtrees in apply_mutations");
+        let subtrees_from_storage = self.storage.get_subtrees(&subtree_roots_indices)?;
 
         // Map the subtrees
         let mut loaded_subtrees: UnorderedMap<NodeIndex, Option<Subtree>> = subtree_roots_indices
@@ -514,7 +520,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         leaf_indices.dedup();
 
         // Get leaves from storage
-        let leaves = self.storage.get_leaves(&leaf_indices).expect("Failed to get leaves");
+        let leaves = self.storage.get_leaves(&leaf_indices)?;
 
         // Map leaf indices to their corresponding leaves
         let mut leaf_map: UnorderedMap<u64, Option<SmtLeaf>> =
@@ -570,9 +576,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             leaf_count_delta,
             entry_count_delta,
         );
-        self.storage.apply(updates).expect("Failed to apply updates");
-        // cache root
-        self.root = new_root;
+        self.storage.apply(updates)?;
         Ok(())
     }
 
@@ -589,7 +593,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
-    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, MerkleError>
+    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, LargeSmtError>
     where
         Self: Sized,
     {
@@ -666,59 +670,57 @@ impl<S: SmtStorage> LargeSmt<S> {
         // Store the initial leaves
         self.storage.set_leaves(initial_leaves).expect("Failed to store initial leaves");
 
-        // Setup background writer thread with a bounded channel.
-        let (sender, receiver) = flume::bounded(SUBTREE_WRITE_BATCH_SIZE);
-        let storage_clone = Arc::clone(&self.storage);
+        // build deep (disk-backed) subtrees
+        leaf_subtrees = std::thread::scope(|scope| {
+            let (sender, receiver) = flume::bounded(CONSTRUCTION_SUBTREE_BATCH_SIZE);
+            let storage: &S = &self.storage;
 
-        let writer_handle = std::thread::spawn(move || -> Result<(), MerkleError> {
-            let mut subtrees: Vec<Subtree> = Vec::with_capacity(SUBTREE_WRITE_BATCH_SIZE);
-            for subtree in receiver.iter() {
-                subtrees.push(subtree);
-                if subtrees.len() == SUBTREE_WRITE_BATCH_SIZE {
-                    let subtrees_clone = mem::take(&mut subtrees);
-                    storage_clone
-                        .set_subtrees(subtrees_clone)
-                        .expect("Writer thread failed to set subtrees");
+            scope.spawn(move || -> Result<(), MerkleError> {
+                let mut subtrees: Vec<Subtree> = Vec::with_capacity(CONSTRUCTION_SUBTREE_BATCH_SIZE);
+                for subtree in receiver.iter() {
+                    subtrees.push(subtree);
+                    if subtrees.len() == CONSTRUCTION_SUBTREE_BATCH_SIZE {
+                        let subtrees_clone = mem::take(&mut subtrees);
+                        storage
+                            .set_subtrees(subtrees_clone)
+                            .expect("Writer thread failed to set subtrees");
+                    }
                 }
+                storage.set_subtrees(subtrees).expect("Writer thread failed to set subtrees");
+                Ok(())
+            });
+
+            for bottom_depth in (IN_MEMORY_DEPTH + SUBTREE_DEPTH..=SMT_DEPTH)
+                .step_by(SUBTREE_DEPTH as usize)
+                .rev()
+            {
+                let mut subtree_roots: Vec<SubtreeLeaf> = leaf_subtrees
+                    .into_par_iter()
+                    .map(|subtree_leaves| {
+                        debug_assert!(subtree_leaves.is_sorted());
+                        debug_assert!(!subtree_leaves.is_empty());
+                        let (nodes, subtree_root) =
+                            build_subtree(subtree_leaves, SMT_DEPTH, bottom_depth);
+
+                        let subtree_root_index =
+                            NodeIndex::new(bottom_depth - SUBTREE_DEPTH, subtree_root.col).unwrap();
+                        let mut subtree = Subtree::new(subtree_root_index);
+                        for (index, node) in nodes {
+                            subtree.insert_inner_node(index, node);
+                        }
+                        sender.send(subtree).expect("Flume channel disconnected unexpectedly");
+                        subtree_root
+                    })
+                    .collect();
+                leaf_subtrees = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
+                debug_assert!(!leaf_subtrees.is_empty());
             }
-            storage_clone
-                .set_subtrees(subtrees)
-                .expect("Writer thread failed to set subtrees");
-            Ok(())
+
+            drop(sender);
+            leaf_subtrees
         });
 
-        for bottom_depth in (IN_MEMORY_DEPTH + SUBTREE_DEPTH..=SMT_DEPTH)
-            .step_by(SUBTREE_DEPTH as usize)
-            .rev()
-        {
-            let mut subtree_roots: Vec<SubtreeLeaf> = leaf_subtrees
-                .into_par_iter()
-                .map(|subtree_leaves| {
-                    debug_assert!(subtree_leaves.is_sorted());
-                    debug_assert!(!subtree_leaves.is_empty());
-                    let (nodes, subtree_root) =
-                        build_subtree(subtree_leaves, SMT_DEPTH, bottom_depth);
-
-                    let subtree_root_index =
-                        NodeIndex::new(bottom_depth - SUBTREE_DEPTH, subtree_root.col).unwrap();
-                    let mut subtree = Subtree::new(subtree_root_index);
-                    for (index, node) in nodes {
-                        subtree.insert_inner_node(index, node);
-                    }
-                    sender.send(subtree).expect("Flume channel disconnected unexpectedly");
-                    subtree_root
-                })
-                .collect();
-            leaf_subtrees = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
-            debug_assert!(!leaf_subtrees.is_empty());
-        }
-
-        // Finalize: Drop sender, wait for writer thread to finish
-        drop(sender);
-        let _ = writer_handle.join().expect("Writer thread panicked");
-        // -----------------------------------------------
-
-        // Build top subtrees (in-memory only, normal insert)
+        // build top of the tree (in-memory only, normal insert)
         for bottom_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
             let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) =
@@ -901,11 +903,10 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
     }
 
     fn root(&self) -> Word {
-        self.root
+        self.storage.get_root().ok().flatten().unwrap_or(Self::EMPTY_ROOT)
     }
 
     fn set_root(&mut self, root: Word) {
-        self.root = root;
         self.storage.set_root(root).expect("Failed to set root");
     }
 
@@ -951,7 +952,9 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
             return value;
         }
 
-        let mutations = self.compute_mutations([(key, value)]);
+        let mutations = self
+            .compute_mutations([(key, value)])
+            .expect("Failed to compute mutations in insert");
         self.apply_mutations(mutations).expect("Failed to apply mutations in insert");
 
         old_value
@@ -1084,9 +1087,9 @@ impl<S: SmtStorage> PartialEq for LargeSmt<S> {
     /// storage contents. Two SMTs with the same root should be cryptographically
     /// equivalent, but this doesn't verify the storage backends are identical.
     fn eq(&self, other: &Self) -> bool {
-        self.root == other.root
-            && self.num_leaves() == other.num_leaves()
-            && self.num_entries() == other.num_entries()
+        self.root().unwrap() == other.root().unwrap()
+            && self.num_leaves().unwrap() == other.num_leaves().unwrap()
+            && self.num_entries().unwrap() == other.num_entries().unwrap()
     }
 }
 
@@ -1173,8 +1176,10 @@ impl<S: SmtStorage> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                             continue; // Start processing subtrees immediately
                         },
                         Err(_e) => {
+                            // Storage error occurred - we should propagate this properly
+                            // For now, transition to Done state to avoid infinite loops
                             self.state = InnerNodeIteratorState::Done;
-                            return None; // No more items if subtree iterator fails
+                            return None;
                         },
                     }
                 },

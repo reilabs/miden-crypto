@@ -9,8 +9,6 @@ fn test_initial_state() {
     assert_eq!(subtree.root_index(), root_index, "Root index should match the provided index");
     assert_eq!(subtree.len(), 0, "New subtree should be empty");
     assert!(subtree.is_empty(), "New subtree should report as empty");
-    assert_eq!(subtree.present_nodes, 0, "New subtree should have no present nodes");
-    assert!(subtree.nodes.is_empty(), "New subtree's node storage should be empty");
 }
 
 #[test]
@@ -37,12 +35,10 @@ fn test_node_operations() {
     let old_node = subtree.insert_inner_node(node1_idx, node1.clone());
     assert!(old_node.is_none(), "Old node should be empty");
     assert_eq!(subtree.len(), 1, "Subtree should have one node");
-    assert_eq!(subtree.present_nodes, 1, "Present nodes count should be 1");
 
     let old_node = subtree.insert_inner_node(node2_idx, node2.clone());
     assert!(old_node.is_none(), "Old node should be empty");
     assert_eq!(subtree.len(), 2, "Subtree should have two nodes");
-    assert_eq!(subtree.present_nodes, 2, "Present nodes count should be 2");
 
     // Test node retrieval
     assert_eq!(
@@ -70,7 +66,6 @@ fn test_node_operations() {
     let previous_node = subtree.insert_inner_node(node1_idx, node1_updated.clone());
     assert_eq!(previous_node, Some(node1), "Overwriting should return the previous node");
     assert_eq!(subtree.len(), 2, "Length should not change on overwrite");
-    assert_eq!(subtree.present_nodes, 2, "Present nodes count should remain the same");
     assert_eq!(
         subtree.get_inner_node(node1_idx),
         Some(node1_updated.clone()),
@@ -81,7 +76,6 @@ fn test_node_operations() {
     let removed_node = subtree.remove_inner_node(node1_idx);
     assert_eq!(removed_node, Some(node1_updated), "Removing should return the removed node");
     assert_eq!(subtree.len(), 1, "Length should decrease after removal");
-    assert_eq!(subtree.present_nodes, 1, "Present nodes count should decrease");
     assert!(
         subtree.get_inner_node(node1_idx).is_none(),
         "Removed node should no longer be retrievable"
@@ -91,13 +85,11 @@ fn test_node_operations() {
     let remove_result = subtree.remove_inner_node(node1_idx);
     assert!(remove_result.is_none(), "Removing non-existent node should return None");
     assert_eq!(subtree.len(), 1, "Length should not change when removing non-existent node");
-    assert_eq!(subtree.present_nodes, 1, "Present nodes count should not change");
 
     // Remove final node to test empty state
     let removed_node = subtree.remove_inner_node(node2_idx);
     assert_eq!(removed_node, Some(node2), "Should remove the final node");
     assert_eq!(subtree.len(), 0, "Subtree should be empty after removing all nodes");
-    assert_eq!(subtree.present_nodes, 0, "Present nodes count should be zero");
     assert!(subtree.is_empty(), "Subtree should report as empty");
 
     // Test removing from empty subtree

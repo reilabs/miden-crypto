@@ -1,7 +1,5 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
-
-use thiserror::Error;
 
 use crate::{
     Word,
@@ -14,6 +12,9 @@ use crate::{
     },
 };
 
+mod error;
+pub use error::StorageError;
+
 #[cfg(feature = "rocksdb")]
 mod rocksdb;
 #[cfg(feature = "rocksdb")]
@@ -21,30 +22,6 @@ pub use rocksdb::{RocksDbConfig, RocksDbStorage};
 
 mod memory;
 pub use memory::MemoryStorage;
-
-/// Defines the set of errors that can occur during SMT storage operations.
-#[derive(Debug, Error)]
-pub enum StorageError {
-    /// An error originating from the underlying storage backend (e.g., a database error).
-    #[error("Storage backend error: {0}")]
-    BackendError(String),
-    /// Error during deserialization of data read from storage.
-    #[error("Deserialization error: {0}")]
-    DeserializationError(String),
-    /// Error during serialization of data before writing to storage.
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
-    /// Indicates that a requested item was not found in the storage.
-    #[error("Item not found in storage")]
-    NotFound,
-    /// An operation was attempted that is not supported by the current storage implementation.
-    #[error("Operation not supported: {0}")]
-    OperationNotSupported(String),
-    /// A catch-all for other storage-related errors not covered by more specific variants.
-    /// Contains a string describing the error.
-    #[error("Storage error: {0}")]
-    Other(String),
-}
 
 /// Represents a collection of changes to be applied atomically to an SMT storage backend.
 ///

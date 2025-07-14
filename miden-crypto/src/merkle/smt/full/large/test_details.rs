@@ -77,7 +77,7 @@ pub fn smt_get_value<S: SmtStorage>(storage: S) {
 pub fn equivalent_roots<S: SmtStorage>(storage: S) {
     let entries = generate_entries(1000);
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
-    assert_eq!(control_smt.root(), large_smt.root());
+    assert_eq!(control_smt.root(), large_smt.root().unwrap());
 }
 
 pub fn equivalent_openings<S: SmtStorage>(storage: S) {
@@ -94,14 +94,15 @@ pub fn equivalent_entry_sets<S: SmtStorage>(storage: S) {
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
     let mut entries_control_smt_owned: Vec<(Word, Word)> = control_smt.entries().copied().collect();
-    let mut entries_large_smt: Vec<(Word, Word)> = large_smt.entries().collect();
+    let mut entries_large_smt: Vec<(Word, Word)> =
+        large_smt.entries().expect("Failed to get entries").collect();
 
     entries_control_smt_owned.sort_by_key(|k| k.0);
     entries_large_smt.sort_by_key(|k| k.0);
 
     assert_eq!(entries_control_smt_owned, entries_large_smt);
-    assert_eq!(control_smt.num_leaves(), large_smt.num_leaves());
-    assert_eq!(control_smt.num_entries(), large_smt.num_entries());
+    assert_eq!(control_smt.num_leaves(), large_smt.num_leaves().unwrap());
+    assert_eq!(control_smt.num_entries(), large_smt.num_entries().unwrap());
 }
 
 pub fn equivalent_leaf_sets<S: SmtStorage>(storage: S) {
@@ -110,15 +111,16 @@ pub fn equivalent_leaf_sets<S: SmtStorage>(storage: S) {
 
     let mut leaves_control_smt: Vec<(LeafIndex<SMT_DEPTH>, SmtLeaf)> =
         control_smt.leaves().map(|(idx, leaf_ref)| (idx, leaf_ref.clone())).collect();
-    let mut leaves_large_smt: Vec<(LeafIndex<SMT_DEPTH>, SmtLeaf)> = large_smt.leaves().collect();
+    let mut leaves_large_smt: Vec<(LeafIndex<SMT_DEPTH>, SmtLeaf)> =
+        large_smt.leaves().expect("Failed to get leaves").collect();
 
     leaves_control_smt.sort_by_key(|k| k.0);
     leaves_large_smt.sort_by_key(|k| k.0);
 
     assert_eq!(leaves_control_smt.len(), leaves_large_smt.len());
     assert_eq!(leaves_control_smt, leaves_large_smt);
-    assert_eq!(control_smt.num_leaves(), large_smt.num_leaves());
-    assert_eq!(control_smt.num_entries(), large_smt.num_entries());
+    assert_eq!(control_smt.num_leaves(), large_smt.num_leaves().unwrap());
+    assert_eq!(control_smt.num_entries(), large_smt.num_entries().unwrap());
 }
 
 pub fn equivalent_inner_nodes<S: SmtStorage>(storage: S) {
@@ -126,13 +128,17 @@ pub fn equivalent_inner_nodes<S: SmtStorage>(storage: S) {
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
     let mut control_smt_inner_nodes: Vec<InnerNodeInfo> = control_smt.inner_nodes().collect();
-    let mut large_smt_inner_nodes: Vec<InnerNodeInfo> = large_smt.inner_nodes().collect();
+    let mut large_smt_inner_nodes: Vec<InnerNodeInfo> =
+        large_smt.inner_nodes().expect("Failed to get inner nodes").collect();
 
+    // Sort both vectors by hash for comparison
     control_smt_inner_nodes.sort_by_key(|info| info.value);
     large_smt_inner_nodes.sort_by_key(|info| info.value);
 
     assert_eq!(control_smt_inner_nodes.len(), large_smt_inner_nodes.len());
-    assert_eq!(control_smt_inner_nodes, large_smt_inner_nodes);
+    for (control, large) in control_smt_inner_nodes.iter().zip(large_smt_inner_nodes.iter()) {
+        assert_eq!(control, large);
+    }
 }
 
 pub fn compute_mutations<S: SmtStorage>(storage: S) {
@@ -146,7 +152,7 @@ pub fn compute_mutations<S: SmtStorage>(storage: S) {
     let updates = generate_updates(entries, 1000);
     let control_mutations = control_smt.compute_mutations(updates.clone());
 
-    let mutations = large_tree.compute_mutations(updates);
+    let mutations = large_tree.compute_mutations(updates).unwrap();
     assert_eq!(mutations.root(), control_mutations.root());
     assert_eq!(mutations.old_root(), control_mutations.old_root());
     assert_eq!(mutations.node_mutations(), control_mutations.node_mutations());
@@ -157,7 +163,7 @@ pub fn empty_smt<S: SmtStorage>(storage: S) {
     let large_smt = LargeSmt::<S>::new(storage).expect("Failed to create empty SMT");
 
     let empty_control_smt = Smt::new();
-    assert_eq!(large_smt.root(), empty_control_smt.root(), "Empty SMT root mismatch");
+    assert_eq!(large_smt.root().unwrap(), empty_control_smt.root(), "Empty SMT root mismatch");
 
     let random_key = Word::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     assert_eq!(
@@ -166,9 +172,21 @@ pub fn empty_smt<S: SmtStorage>(storage: S) {
         "get_value on empty SMT should return EMPTY_WORD"
     );
 
-    assert_eq!(large_smt.entries().count(), 0, "Empty SMT should have no entries");
-    assert_eq!(large_smt.leaves().count(), 0, "Empty SMT should have no leaves");
-    assert_eq!(large_smt.inner_nodes().count(), 0, "Empty SMT should have no inner nodes");
+    assert_eq!(
+        large_smt.entries().expect("Failed to get entries").count(),
+        0,
+        "Empty SMT should have no entries"
+    );
+    assert_eq!(
+        large_smt.leaves().expect("Failed to get leaves").count(),
+        0,
+        "Empty SMT should have no leaves"
+    );
+    assert_eq!(
+        large_smt.inner_nodes().expect("Failed to get inner nodes").count(),
+        0,
+        "Empty SMT should have no inner nodes"
+    );
 }
 
 pub fn single_entry_smt<S: SmtStorage>(storage: S) {
@@ -180,7 +198,7 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
 
     // Check root
     let control_smt_single = Smt::with_entries([(key, value)]).unwrap();
-    assert_eq!(smt.root(), control_smt_single.root(), "Single entry SMT root mismatch");
+    assert_eq!(smt.root().unwrap(), control_smt_single.root(), "Single entry SMT root mismatch");
 
     // Check get_value for the existing key
     assert_eq!(smt.get_value(&key), value, "get_value for existing key failed");
@@ -190,13 +208,13 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
     assert_eq!(smt.get_value(&other_key), EMPTY_WORD, "get_value for non-existing key failed");
 
     // Check entries iterator
-    let entries: Vec<_> = smt.entries().collect();
+    let entries: Vec<_> = smt.entries().expect("Failed to get entries").collect();
     assert_eq!(entries.len(), 1, "Single entry SMT should have one entry");
     assert_eq!(entries[0], (key, value), "Single entry SMT entry mismatch");
 
     // Update the entry
     let new_value = Word::new([2_u32.into(); WORD_SIZE]);
-    let mutations = smt.compute_mutations(vec![(key, new_value)]);
+    let mutations = smt.compute_mutations(vec![(key, new_value)]).unwrap();
 
     // test opening before mutations
     assert_eq!(
@@ -208,7 +226,7 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
     smt.apply_mutations(mutations).unwrap();
 
     let control_smt_updated = Smt::with_entries([(key, new_value)]).unwrap();
-    assert_eq!(smt.root(), control_smt_updated.root(), "Updated SMT root mismatch");
+    assert_eq!(smt.root().unwrap(), control_smt_updated.root(), "Updated SMT root mismatch");
     assert_eq!(smt.get_value(&key), new_value, "get_value after update failed");
 
     // test opening after mutations
@@ -219,13 +237,21 @@ pub fn single_entry_smt<S: SmtStorage>(storage: S) {
     );
 
     // "Delete" the entry by updating its value to EMPTY_WORD
-    let mutations_delete = smt.compute_mutations(vec![(key, EMPTY_WORD)]);
+    let mutations_delete = smt.compute_mutations(vec![(key, EMPTY_WORD)]).unwrap();
     smt.apply_mutations(mutations_delete).unwrap();
 
     let empty_control_smt = Smt::new();
-    assert_eq!(smt.root(), empty_control_smt.root(), "SMT root after deletion mismatch");
+    assert_eq!(
+        smt.root().unwrap(),
+        empty_control_smt.root(),
+        "SMT root after deletion mismatch"
+    );
     assert_eq!(smt.get_value(&key), EMPTY_WORD, "get_value after deletion failed");
-    assert_eq!(smt.entries().count(), 0, "SMT should have no entries after deletion");
+    assert_eq!(
+        smt.entries().expect("Failed to get entries").count(),
+        0,
+        "SMT should have no entries after deletion"
+    );
 }
 
 pub fn duplicate_key_insertion<S: SmtStorage>(storage: S) {
@@ -252,7 +278,7 @@ pub fn delete_entry<S: SmtStorage>(storage: S) {
     let mut smt = LargeSmt::<S>::with_entries(storage, initial_entries.clone()).unwrap();
 
     // "Delete" key2 by updating its value to EMPTY_WORD
-    let mutations = smt.compute_mutations(vec![(key2, EMPTY_WORD)]);
+    let mutations = smt.compute_mutations(vec![(key2, EMPTY_WORD)]).unwrap();
     smt.apply_mutations(mutations).unwrap();
 
     // Check that key2 now returns EMPTY_WORD
@@ -263,7 +289,7 @@ pub fn delete_entry<S: SmtStorage>(storage: S) {
     );
 
     // Check that key2 is not in entries()
-    let current_entries: Vec<_> = smt.entries().collect();
+    let current_entries: Vec<_> = smt.entries().expect("Failed to get entries").collect();
     assert!(
         !current_entries.iter().any(|(k, _v)| k == &key2),
         "Deleted key should not be in entries"
@@ -277,7 +303,11 @@ pub fn delete_entry<S: SmtStorage>(storage: S) {
     // Verify the root hash against a control SMT with the remaining entries
     let remaining_entries = vec![(key1, value1), (key3, value3)];
     let control_smt_after_delete = Smt::with_entries(remaining_entries).unwrap();
-    assert_eq!(smt.root(), control_smt_after_delete.root(), "SMT root mismatch after deletion");
+    assert_eq!(
+        smt.root().unwrap(),
+        control_smt_after_delete.root(),
+        "SMT root mismatch after deletion"
+    );
 }
 
 pub fn insert_entry<S: SmtStorage>(storage: S) {
@@ -286,8 +316,16 @@ pub fn insert_entry<S: SmtStorage>(storage: S) {
     let mut large_smt = LargeSmt::<S>::with_entries(storage, initial_entries.clone()).unwrap();
     let mut control_smt = Smt::with_entries(initial_entries.clone()).unwrap();
 
-    assert_eq!(large_smt.num_entries(), control_smt.num_entries(), "Number of entries mismatch");
-    assert_eq!(large_smt.num_leaves(), control_smt.num_leaves(), "Number of leaves mismatch");
+    assert_eq!(
+        large_smt.num_entries().unwrap(),
+        control_smt.num_entries(),
+        "Number of entries mismatch"
+    );
+    assert_eq!(
+        large_smt.num_leaves().unwrap(),
+        control_smt.num_leaves(),
+        "Number of leaves mismatch"
+    );
 
     // Generate new key that wasn't in the initial construction
     let new_key = Word::from([100_u32, 100_u32, 100_u32, 100_u32]);
@@ -298,15 +336,23 @@ pub fn insert_entry<S: SmtStorage>(storage: S) {
     assert_eq!(old_value, control_old_value, "Old values mismatch");
     assert_eq!(old_value, EMPTY_WORD, "Expected empty value");
 
-    assert_eq!(large_smt.num_entries(), control_smt.num_entries(), "Number of entries mismatch");
-    assert_eq!(large_smt.num_leaves(), control_smt.num_leaves(), "Number of leaves mismatch");
+    assert_eq!(
+        large_smt.num_entries().unwrap(),
+        control_smt.num_entries(),
+        "Number of entries mismatch"
+    );
+    assert_eq!(
+        large_smt.num_leaves().unwrap(),
+        control_smt.num_leaves(),
+        "Number of leaves mismatch"
+    );
 
     // Verify the value was inserted
     assert_eq!(large_smt.get_value(&new_key), new_value, "Value mismatch");
     assert_eq!(control_smt.get_value(&new_key), new_value, "Value mismatch");
 
     // Verify roots match
-    assert_eq!(large_smt.root(), control_smt.root(), "Roots don't match after insert");
+    assert_eq!(large_smt.root().unwrap(), control_smt.root(), "Roots don't match after insert");
 
     // Try to open a proof for the inserted key
     let large_proof = large_smt.open(&new_key);
@@ -335,18 +381,19 @@ pub fn mutations_revert<S: SmtStorage>(storage: S) {
     smt.insert(key_1, value_1);
     smt.insert(key_2, value_2);
 
-    let mutations =
-        smt.compute_mutations(vec![(key_1, EMPTY_WORD), (key_2, value_1), (key_3, value_3)]);
+    let mutations = smt
+        .compute_mutations(vec![(key_1, EMPTY_WORD), (key_2, value_1), (key_3, value_3)])
+        .unwrap();
 
-    let original_root = smt.root();
+    let original_root = smt.root().unwrap();
     let revert = smt.apply_mutations_with_reversion(mutations).unwrap();
-    assert_eq!(revert.old_root, smt.root(), "reverse mutations old root did not match");
+    assert_eq!(revert.old_root, smt.root().unwrap(), "reverse mutations old root did not match");
     assert_eq!(revert.root(), original_root, "reverse mutations new root did not match");
 
     smt.apply_mutations(revert).unwrap();
 
     assert_eq!(
-        smt.root(),
+        smt.root().unwrap(),
         original_root,
         "SMT with applied revert mutations did not match original SMT"
     );

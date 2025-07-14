@@ -1,5 +1,4 @@
-use miden_crypto::merkle::test_details;
-use miden_crypto::merkle::{InnerNodeInfo, LargeSmt, RocksDbConfig, RocksDbStorage};
+use miden_crypto::merkle::{InnerNodeInfo, LargeSmt, RocksDbConfig, RocksDbStorage, test_details};
 use tempfile::TempDir;
 
 fn setup_storage() -> (RocksDbStorage, TempDir) {
@@ -96,10 +95,10 @@ fn rocksdb_test_reopening_smt() {
     let db_path = temp_dir_guard.path().to_path_buf();
 
     let smt = LargeSmt::<RocksDbStorage>::with_entries(initial_storage, entries).unwrap();
-    let root = smt.root();
+    let root = smt.root().unwrap();
 
     // collect all the inner nodes
-    let mut inner_nodes: Vec<InnerNodeInfo> = smt.inner_nodes().collect();
+    let mut inner_nodes: Vec<InnerNodeInfo> = smt.inner_nodes().unwrap().collect();
     inner_nodes.sort_by_key(|info| info.value);
     drop(smt);
 
@@ -108,13 +107,13 @@ fn rocksdb_test_reopening_smt() {
     let smt = LargeSmt::<RocksDbStorage>::new(reopened_storage).unwrap();
 
     // again collect all the inner nodes
-    let mut inner_nodes_2: Vec<InnerNodeInfo> = smt.inner_nodes().collect();
+    let mut inner_nodes_2: Vec<InnerNodeInfo> = smt.inner_nodes().unwrap().collect();
     inner_nodes_2.sort_by_key(|info| info.value);
 
     // check if the inner nodes match
     assert_eq!(inner_nodes.len(), inner_nodes_2.len());
     assert_eq!(inner_nodes, inner_nodes_2);
-    assert_eq!(smt.root(), root);
+    assert_eq!(smt.root().unwrap(), root);
 }
 
 #[test]
@@ -126,10 +125,10 @@ fn rocksdb_test_reopening_smt_after_insertion() {
     let db_path = temp_dir_guard.path().to_path_buf();
 
     let smt = LargeSmt::<RocksDbStorage>::with_entries(initial_storage, entries).unwrap();
-    let root = smt.root();
+    let root = smt.root().unwrap();
 
     // collect all the inner nodes
-    let mut inner_nodes: Vec<InnerNodeInfo> = smt.inner_nodes().collect();
+    let mut inner_nodes: Vec<InnerNodeInfo> = smt.inner_nodes().unwrap().collect();
     inner_nodes.sort_by_key(|info| info.value);
     drop(smt);
 
@@ -138,11 +137,11 @@ fn rocksdb_test_reopening_smt_after_insertion() {
     let smt = LargeSmt::<RocksDbStorage>::new(reopened_storage).unwrap();
 
     // again collect all the inner nodes
-    let mut inner_nodes_2: Vec<InnerNodeInfo> = smt.inner_nodes().collect();
+    let mut inner_nodes_2: Vec<InnerNodeInfo> = smt.inner_nodes().unwrap().collect();
     inner_nodes_2.sort_by_key(|info| info.value);
 
     // check if the inner nodes match
     assert_eq!(inner_nodes.len(), inner_nodes_2.len());
     assert_eq!(inner_nodes, inner_nodes_2);
-    assert_eq!(smt.root(), root);
+    assert_eq!(smt.root().unwrap(), root);
 }

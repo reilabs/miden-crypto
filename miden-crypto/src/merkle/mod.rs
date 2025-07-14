@@ -29,7 +29,7 @@ pub use smt::{
     SMT_MIN_DEPTH, SimpleSmt, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError,
 };
 #[cfg(feature = "concurrent")]
-pub use smt::{LargeSmt, MemoryStorage};
+pub use smt::{LargeSmt, LargeSmtError, MemoryStorage};
 #[cfg(feature = "rocksdb")]
 pub use smt::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "internal")]
