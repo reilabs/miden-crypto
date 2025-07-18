@@ -1,6 +1,10 @@
+## 0.15.7 (2025-07-18)
+
+- Fix empty SMT serialization check in testing mode ([#456](https://github.com/0xMiden/crypto/pull/456)).
+
 ## 0.15.6 (2025-07-15)
 
-- Added conversions and seralization for `PartialSmt` ([#451](https://github.com/0xMiden/crypto/pull/451/), [#453](https://github.com/0xMiden/crypto/pull/453/)).
+- Added conversions and serialization for `PartialSmt` ([#451](https://github.com/0xMiden/crypto/pull/451/), [#453](https://github.com/0xMiden/crypto/pull/453/)).
 
 ## 0.15.5 (2025-07-10)
 
