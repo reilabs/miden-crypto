@@ -18,7 +18,7 @@ use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 #[cfg(feature = "concurrent")]
 mod large;
 #[cfg(feature = "concurrent")]
-pub use large::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage};
+pub use large::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
 #[cfg(feature = "rocksdb")]
 pub use large::{RocksDbConfig, RocksDbStorage};
 

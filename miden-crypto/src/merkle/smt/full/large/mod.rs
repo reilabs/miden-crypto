@@ -27,7 +27,7 @@ mod subtree;
 use subtree::Subtree;
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdates};
+pub use storage::{MemoryStorage, SmtStorage, Subtree, StorageError, StorageUpdates};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 
