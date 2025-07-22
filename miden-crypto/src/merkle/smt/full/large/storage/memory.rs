@@ -7,7 +7,7 @@ use crate::{
     merkle::{
         EmptySubtreeRoots, InnerNode, NodeIndex, SmtLeaf,
         smt::{
-            UnorderedMap,
+            Map,
             full::large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
         },
     },
@@ -27,8 +27,8 @@ use crate::{
 #[derive(Debug)]
 pub struct MemoryStorage {
     pub root: RwLock<Word>,
-    pub leaves: RwLock<UnorderedMap<u64, SmtLeaf>>,
-    pub subtrees: RwLock<UnorderedMap<NodeIndex, Subtree>>,
+    pub leaves: RwLock<Map<u64, SmtLeaf>>,
+    pub subtrees: RwLock<Map<NodeIndex, Subtree>>,
 }
 
 impl MemoryStorage {
@@ -40,8 +40,8 @@ impl MemoryStorage {
         let root_val = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
         Self {
             root: RwLock::new(root_val),
-            leaves: RwLock::new(UnorderedMap::new()),
-            subtrees: RwLock::new(UnorderedMap::new()),
+            leaves: RwLock::new(Map::new()),
+            subtrees: RwLock::new(Map::new()),
         }
     }
 }
@@ -155,7 +155,7 @@ impl SmtStorage for MemoryStorage {
     ///
     /// # Errors
     /// Returns `StorageError::Backend` if the write lock for leaves cannot be acquired.
-    fn set_leaves(&self, leaves_map: UnorderedMap<u64, SmtLeaf>) -> Result<(), StorageError> {
+    fn set_leaves(&self, leaves_map: Map<u64, SmtLeaf>) -> Result<(), StorageError> {
         let mut leaves_guard = self.leaves.write()?;
         leaves_guard.extend(leaves_map);
         Ok(())

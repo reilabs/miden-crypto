@@ -13,4 +13,3 @@ cmake-build-*
 
 # Proptest
 tests.txt
-*.mdb

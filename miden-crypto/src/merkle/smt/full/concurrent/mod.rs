@@ -333,10 +333,8 @@ impl Smt {
         // The closure is the only possible source of errors.
         // Since it never returns an error - only `Ok(Some(_))` or `Ok(None)` - we can safely assume
         // `accumulator` is always `Ok(_)`.
-        (
-            accumulator.expect("process_sorted_pairs_to_leaves never fails").leaves,
-            new_pairs,
-        )
+        let final_leaves = accumulator.expect("process_sorted_pairs_to_leaves never fails").leaves;
+        (final_leaves, new_pairs)
     }
 }
 
@@ -542,7 +540,7 @@ fn build_subtrees_from_sorted_entries(
         return Ok((accumulated_nodes, initial_leaves));
     }
     for current_depth in (SUBTREE_DEPTH..=SMT_DEPTH).step_by(SUBTREE_DEPTH as usize).rev() {
-        let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) = leaf_subtrees
+        let (nodes, mut subtree_roots): (Vec<Map<_, _>>, Vec<SubtreeLeaf>) = leaf_subtrees
             .into_par_iter()
             .map(|subtree| {
                 debug_assert!(subtree.is_sorted());

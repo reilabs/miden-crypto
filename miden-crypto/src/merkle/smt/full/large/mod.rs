@@ -13,7 +13,7 @@ use super::{
         build_subtree, fetch_sibling_pair, process_sorted_pairs_to_leaves,
     },
 };
-use crate::merkle::smt::{NodeMutation, NodeMutations, UnorderedMap};
+use crate::merkle::smt::{Map, NodeMutation, NodeMutations};
 
 mod error;
 pub use error::LargeSmtError;
@@ -49,8 +49,9 @@ const NUM_SUBTREE_LEVELS: usize = 5;
 /// * This constant is **only** used while building a fresh tree; incremental updates use their own
 ///   per-batch sizing.
 /// * Construction is all-or-nothing: if the write fails we abort and rebuild from scratch, so we
-///   prefer larger batches that maximise I/O throughput instead of fine-grained rollback safety.
+///   allow larger batches that maximise I/O throughput instead of fine-grained rollback safety.
 const CONSTRUCTION_SUBTREE_BATCH_SIZE: usize = 10_000;
+
 /// Subtree depths for the subtrees stored in storage
 const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
 
@@ -129,17 +130,15 @@ impl<S: SmtStorage> LargeSmt<S> {
         // build in-memory top of the tree
         for current_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
-            let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) =
-                subtree_leaves
-                    .into_par_iter()
-                    .map(|subtree| {
-                        debug_assert!(subtree.is_sorted());
-                        debug_assert!(!subtree.is_empty());
-                        let (nodes, subtree_root) =
-                            build_subtree(subtree, SMT_DEPTH, current_depth);
-                        (nodes, subtree_root)
-                    })
-                    .unzip();
+            let (nodes, mut subtree_roots): (Vec<Map<_, _>>, Vec<SubtreeLeaf>) = subtree_leaves
+                .into_par_iter()
+                .map(|subtree| {
+                    debug_assert!(subtree.is_sorted());
+                    debug_assert!(!subtree.is_empty());
+                    let (nodes, subtree_root) = build_subtree(subtree, SMT_DEPTH, current_depth);
+                    (nodes, subtree_root)
+                })
+                .unzip();
             subtree_leaves = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
             debug_assert!(!subtree_leaves.is_empty());
 
@@ -349,7 +348,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             self.storage.get_leaves(&leaf_indices).expect("Failed to get leaves");
 
         // Map leaf indices to their corresponding leaves
-        let leaf_map: UnorderedMap<u64, SmtLeaf> = leaf_indices
+        let leaf_map: Map<u64, SmtLeaf> = leaf_indices
             .into_iter()
             .zip(leaves_from_storage)
             .filter_map(|(index, maybe_leaf)| maybe_leaf.map(|leaf| (index, leaf)))
@@ -470,7 +469,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         let subtrees_from_storage = self.storage.get_subtrees(&subtree_roots_indices)?;
 
         // Map the subtrees
-        let mut loaded_subtrees: UnorderedMap<NodeIndex, Option<Subtree>> = subtree_roots_indices
+        let mut loaded_subtrees: Map<NodeIndex, Option<Subtree>> = subtree_roots_indices
             .into_iter()
             .zip(subtrees_from_storage)
             .map(|(root_index, subtree_opt)| {
@@ -523,7 +522,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         let leaves = self.storage.get_leaves(&leaf_indices)?;
 
         // Map leaf indices to their corresponding leaves
-        let mut leaf_map: UnorderedMap<u64, Option<SmtLeaf>> =
+        let mut leaf_map: Map<u64, Option<SmtLeaf>> =
             leaf_indices.into_iter().zip(leaves).collect();
 
         let mut leaf_count_delta = 0isize;
@@ -625,7 +624,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             }
         }
 
-        let mut reverse_pairs = UnorderedMap::new();
+        let mut reverse_pairs = Map::new();
         for (key, value) in new_pairs {
             if let Some(old_value) = self.insert_value(key, value) {
                 reverse_pairs.insert(key, old_value);
@@ -676,7 +675,8 @@ impl<S: SmtStorage> LargeSmt<S> {
             let storage: &S = &self.storage;
 
             scope.spawn(move || -> Result<(), MerkleError> {
-                let mut subtrees: Vec<Subtree> = Vec::with_capacity(CONSTRUCTION_SUBTREE_BATCH_SIZE);
+                let mut subtrees: Vec<Subtree> =
+                    Vec::with_capacity(CONSTRUCTION_SUBTREE_BATCH_SIZE);
                 for subtree in receiver.iter() {
                     subtrees.push(subtree);
                     if subtrees.len() == CONSTRUCTION_SUBTREE_BATCH_SIZE {
@@ -723,16 +723,15 @@ impl<S: SmtStorage> LargeSmt<S> {
         // build top of the tree (in-memory only, normal insert)
         for bottom_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
-            let (nodes, mut subtree_roots): (Vec<UnorderedMap<_, _>>, Vec<SubtreeLeaf>) =
-                leaf_subtrees
-                    .into_par_iter()
-                    .map(|subtree| {
-                        debug_assert!(subtree.is_sorted());
-                        debug_assert!(!subtree.is_empty());
-                        let (nodes, subtree_root) = build_subtree(subtree, SMT_DEPTH, bottom_depth);
-                        (nodes, subtree_root)
-                    })
-                    .unzip();
+            let (nodes, mut subtree_roots): (Vec<Map<_, _>>, Vec<SubtreeLeaf>) = leaf_subtrees
+                .into_par_iter()
+                .map(|subtree| {
+                    debug_assert!(subtree.is_sorted());
+                    debug_assert!(!subtree.is_empty());
+                    let (nodes, subtree_root) = build_subtree(subtree, SMT_DEPTH, bottom_depth);
+                    (nodes, subtree_root)
+                })
+                .unzip();
             leaf_subtrees = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
             debug_assert!(!leaf_subtrees.is_empty());
 
@@ -752,10 +751,10 @@ impl<S: SmtStorage> LargeSmt<S> {
     fn sorted_pairs_to_mutated_leaves_with_preloaded_leaves(
         &self,
         pairs: Vec<(Word, Word)>,
-        leaf_map: UnorderedMap<u64, SmtLeaf>,
-    ) -> (MutatedSubtreeLeaves, UnorderedMap<Word, Word>) {
+        leaf_map: Map<u64, SmtLeaf>,
+    ) -> (MutatedSubtreeLeaves, Map<Word, Word>) {
         // Map to track new key-value pairs for mutated leaves
-        let mut new_pairs = UnorderedMap::new();
+        let mut new_pairs = Map::new();
 
         let accumulator = process_sorted_pairs_to_leaves(pairs, |leaf_pairs| {
             let leaf_index = LeafIndex::<SMT_DEPTH>::from(leaf_pairs[0].0);
@@ -1035,7 +1034,7 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
             })
             .collect();
         // cache subtrees in memory
-        let mut cache = UnorderedMap::<NodeIndex, Subtree>::new();
+        let mut cache = Map::<NodeIndex, Subtree>::new();
         for &root in &subtree_roots {
             let subtree =
                 match self.storage.get_subtree(root).expect("storage error fetching subtree") {
@@ -1187,10 +1186,10 @@ impl<S: SmtStorage> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                 InnerNodeIteratorState::Subtree { subtree_iter, current_subtree_node_iter } => {
                     loop {
                         // First, try to get the next node from current subtree
-                        if let Some(node_iter) = current_subtree_node_iter {
-                            if let Some(info) = node_iter.as_mut().next() {
-                                return Some(info);
-                            }
+                        if let Some(node_iter) = current_subtree_node_iter
+                            && let Some(info) = node_iter.as_mut().next()
+                        {
+                            return Some(info);
                         }
 
                         // Current subtree exhausted, move to next subtree

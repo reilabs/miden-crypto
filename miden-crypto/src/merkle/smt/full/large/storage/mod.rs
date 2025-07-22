@@ -6,7 +6,7 @@ use crate::{
     merkle::{
         NodeIndex, SmtLeaf,
         smt::{
-            UnorderedMap,
+            Map,
             full::{InnerNode, large::subtree::Subtree},
         },
     },
@@ -23,6 +23,9 @@ pub use rocksdb::{RocksDbConfig, RocksDbStorage};
 mod memory;
 pub use memory::MemoryStorage;
 
+type UpdatesTuple =
+    (Map<u64, Option<SmtLeaf>>, Map<NodeIndex, Option<Subtree>>, Word, isize, isize);
+
 /// Represents a collection of changes to be applied atomically to an SMT storage backend.
 ///
 /// This struct is used to batch multiple updates (to leaves, subtrees, and the SMT root)
@@ -35,13 +38,13 @@ pub struct StorageUpdates {
     /// The key is the logical leaf index (u64).
     /// - `Some(SmtLeaf)` indicates an insertion or update of the leaf at that index.
     /// - `None` indicates a deletion of the leaf at that index.
-    leaf_updates: UnorderedMap<u64, Option<SmtLeaf>>,
+    leaf_updates: Map<u64, Option<SmtLeaf>>,
 
     /// A map of updates to SMT subtrees.
     /// The key is the `NodeIndex` of the subtree's root.
     /// - `Some(Subtree)` indicates an insertion or update of the subtree.
     /// - `None` indicates a deletion of the subtree.
-    subtree_updates: UnorderedMap<NodeIndex, Option<Subtree>>,
+    subtree_updates: Map<NodeIndex, Option<Subtree>>,
 
     /// The new root hash of the SMT that should be persisted after applying
     /// all `leaf_updates` and `subtree_updates`.
@@ -72,8 +75,8 @@ impl StorageUpdates {
     /// the complete maps of updates and calculated deltas, such as when applying
     /// a batch of mutations.
     pub fn from_parts(
-        leaf_updates: UnorderedMap<u64, Option<SmtLeaf>>,
-        subtree_updates: UnorderedMap<NodeIndex, Option<Subtree>>,
+        leaf_updates: Map<u64, Option<SmtLeaf>>,
+        subtree_updates: Map<NodeIndex, Option<Subtree>>,
         new_root: Word,
         leaf_count_delta: isize,
         entry_count_delta: isize,
@@ -124,12 +127,12 @@ impl StorageUpdates {
     }
 
     /// Returns a reference to the leaf updates map.
-    pub fn leaf_updates(&self) -> &UnorderedMap<u64, Option<SmtLeaf>> {
+    pub fn leaf_updates(&self) -> &Map<u64, Option<SmtLeaf>> {
         &self.leaf_updates
     }
 
     /// Returns a reference to the subtree updates map.
-    pub fn subtree_updates(&self) -> &UnorderedMap<NodeIndex, Option<Subtree>> {
+    pub fn subtree_updates(&self) -> &Map<NodeIndex, Option<Subtree>> {
         &self.subtree_updates
     }
 
@@ -169,12 +172,12 @@ impl StorageUpdates {
     }
 
     /// Consumes this StorageUpdates and returns the leaf updates map.
-    pub fn into_leaf_updates(self) -> UnorderedMap<u64, Option<SmtLeaf>> {
+    pub fn into_leaf_updates(self) -> Map<u64, Option<SmtLeaf>> {
         self.leaf_updates
     }
 
     /// Consumes this StorageUpdates and returns the subtree updates map.
-    pub fn into_subtree_updates(self) -> UnorderedMap<NodeIndex, Option<Subtree>> {
+    pub fn into_subtree_updates(self) -> Map<NodeIndex, Option<Subtree>> {
         self.subtree_updates
     }
 
@@ -185,15 +188,7 @@ impl StorageUpdates {
     /// Third component is the new root hash.
     /// Fourth component is the leaf count delta.
     /// Fifth component is the entry count delta.
-    pub fn into_parts(
-        self,
-    ) -> (
-        UnorderedMap<u64, Option<SmtLeaf>>,
-        UnorderedMap<NodeIndex, Option<Subtree>>,
-        Word,
-        isize,
-        isize,
-    ) {
+    pub fn into_parts(self) -> UpdatesTuple {
         (
             self.leaf_updates,
             self.subtree_updates,
@@ -286,7 +281,7 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     ///
     /// # Errors
     /// Returns `StorageError` if any storage operation fails during the batch update.
-    fn set_leaves(&self, leaves: UnorderedMap<u64, SmtLeaf>) -> Result<(), StorageError>;
+    fn set_leaves(&self, leaves: Map<u64, SmtLeaf>) -> Result<(), StorageError>;
 
     /// Removes a single SMT leaf node entirely from storage by its logical `index`.
     ///

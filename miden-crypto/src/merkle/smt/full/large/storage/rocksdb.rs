@@ -14,7 +14,7 @@ use crate::{
     merkle::{
         InnerNode, NodeIndex, SmtLeaf,
         smt::{
-            UnorderedMap,
+            Map,
             full::large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
         },
     },
@@ -415,10 +415,10 @@ impl SmtStorage for RocksDbStorage {
         let mut leaf_count = self.leaf_count()?;
 
         let (current_value, is_empty) = leaf.remove(key);
-        if let Some(current_value) = current_value {
-            if current_value != EMPTY_WORD {
-                entry_count -= 1;
-            }
+        if let Some(current_value) = current_value
+            && current_value != EMPTY_WORD
+        {
+            entry_count -= 1;
         }
         if is_empty {
             leaf_count -= 1;
@@ -460,7 +460,7 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// # Errors
     /// - `StorageError::Backend`: If column families are missing or a RocksDB error occurs.
-    fn set_leaves(&self, leaves: UnorderedMap<u64, SmtLeaf>) -> Result<(), StorageError> {
+    fn set_leaves(&self, leaves: Map<u64, SmtLeaf>) -> Result<(), StorageError> {
         let cf = self.cf_handle(LEAVES_CF)?;
         let leaf_count: usize = leaves.len();
         let entry_count: usize = leaves.values().map(|leaf| leaf.entries().len()).sum();
@@ -695,11 +695,11 @@ impl SmtStorage for RocksDbStorage {
             let value = subtree.to_vec();
             batch.put_cf(subtrees_cf, key, value);
 
-            if subtree.root_index().depth() == IN_MEMORY_DEPTH {
-                if let Some(root_node) = subtree.get_inner_node(subtree.root_index()) {
-                    let hash_key = Self::index_db_key(subtree.root_index().value());
-                    batch.put_cf(depth24_cf, hash_key, root_node.hash().to_bytes());
-                }
+            if subtree.root_index().depth() == IN_MEMORY_DEPTH
+                && let Some(root_node) = subtree.get_inner_node(subtree.root_index())
+            {
+                let hash_key = Self::index_db_key(subtree.root_index().value());
+                batch.put_cf(depth24_cf, hash_key, root_node.hash().to_bytes());
             }
         }
 

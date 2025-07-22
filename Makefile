@@ -105,15 +105,15 @@ bench-smt-concurrent: ## Run SMT benchmarks with concurrent feature
 
 .PHONY: bench-large-smt-memory
 bench-large-smt-memory: ## Run large SMT benchmarks with memory storage
-	cargo run --release --features concurrent,smt_hashmaps,executable -- --size 1000000
+	cargo run --release --features concurrent,hashmaps,executable -- --size 1000000
 
 .PHONY: bench-large-smt-rocksdb
 bench-large-smt-rocksdb: ## Run large SMT benchmarks with rocksdb storage
-	cargo run --release --features concurrent,smt_hashmaps,rocksdb,executable -- --size 1000000
+	cargo run --release --features concurrent,hashmaps,rocksdb,executable -- --size 1000000
 
 .PHONY: bench-large-smt-rocksdb-open
 bench-large-smt-rocksdb-open: ## Run large SMT benchmarks with rocksdb storage and open existing database
-	cargo run --release --features concurrent,smt_hashmaps,rocksdb,executable -- --open
+	cargo run --release --features concurrent,hashmaps,rocksdb,executable -- --open
 
 # --- fuzzing --------------------------------------------------------------------------------
 
