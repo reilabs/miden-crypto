@@ -1,9 +1,11 @@
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
 use super::{LeafIndex, SMT_DEPTH};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
-        InnerNode, InnerNodeInfo, MerkleError, MerklePath, Smt, SmtLeaf, SmtProof,
-        smt::SparseMerkleTree,
+        InnerNode, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Smt, SmtLeaf, SmtProof,
+        smt::{InnerNodes, Leaves, SparseMerkleTree},
     },
 };
 
@@ -287,6 +289,57 @@ impl Default for PartialSmt {
     }
 }
 
+// CONVERSIONS
+// ================================================================================================
+
+impl From<Smt> for PartialSmt {
+    fn from(smt: Smt) -> Self {
+        PartialSmt(smt)
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for PartialSmt {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write(self.root());
+        target.write_usize(self.0.leaves.len());
+        for (i, leaf) in &self.0.leaves {
+            target.write_u64(*i);
+            target.write(leaf);
+        }
+        target.write_usize(self.0.inner_nodes.len());
+        for (idx, node) in &self.0.inner_nodes {
+            target.write(idx);
+            target.write(node);
+        }
+    }
+}
+
+impl Deserializable for PartialSmt {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let root: Word = source.read()?;
+
+        let mut leaves = Leaves::default();
+        for _ in 0..source.read_usize()? {
+            let pos: u64 = source.read()?;
+            let leaf: SmtLeaf = source.read()?;
+            leaves.insert(pos, leaf);
+        }
+
+        let mut nodes = InnerNodes::default();
+        for _ in 0..source.read_usize()? {
+            let idx: NodeIndex = source.read()?;
+            let node: InnerNode = source.read()?;
+            nodes.insert(idx, node);
+        }
+
+        let smt = Smt::from_raw_parts(nodes, leaves, root);
+        Ok(PartialSmt(smt))
+    }
+}
+
 // TESTS
 // ================================================================================================
 
@@ -296,11 +349,11 @@ mod tests {
     use alloc::collections::{BTreeMap, BTreeSet};
 
     use assert_matches::assert_matches;
-    use rand_utils::rand_array;
+    use rand_utils::{rand_array, rand_value};
     use winter_math::fields::f64::BaseElement as Felt;
 
     use super::*;
-    use crate::{EMPTY_WORD, ONE, ZERO};
+    use crate::{EMPTY_WORD, ONE, ZERO, merkle::EmptySubtreeRoots};
 
     /// Tests that a basic PartialSmt can be built from a full one and that inserting or removing
     /// values whose merkle path were added to the partial SMT results in the same root as the
@@ -574,10 +627,16 @@ mod tests {
 
         let partial_inner_nodes: BTreeSet<_> =
             partial.inner_nodes().flat_map(|node| [node.left, node.right]).collect();
+        let empty_subtree_roots: BTreeSet<_> = (0..SMT_DEPTH)
+            .map(|depth| *EmptySubtreeRoots::entry(SMT_DEPTH, depth))
+            .collect();
 
         for merkle_path in proofs.into_iter().map(|proof| proof.into_parts().0) {
             for (idx, digest) in merkle_path.into_iter().enumerate() {
-                assert!(partial_inner_nodes.contains(&digest), "failed at idx {idx}");
+                assert!(
+                    partial_inner_nodes.contains(&digest) || empty_subtree_roots.contains(&digest),
+                    "failed at idx {idx}"
+                );
             }
         }
     }
@@ -586,5 +645,31 @@ mod tests {
     #[test]
     fn partial_smt_is_empty() {
         assert!(PartialSmt::new().is_empty());
+    }
+
+    /// `PartialSmt` serde round-trip. Also tests conversion from SMT.
+    #[test]
+    fn partial_smt_serialization_roundtrip() {
+        let key = rand_value();
+        let val = rand_value();
+
+        let key_1 = rand_value();
+        let val_1 = rand_value();
+
+        let key_2 = rand_value();
+        let val_2 = rand_value();
+
+        let smt: Smt = Smt::with_entries([(key, val), (key_1, val_1), (key_2, val_2)]).unwrap();
+
+        let partial_smt = PartialSmt::from_proofs([smt.open(&key)]).unwrap();
+
+        assert_eq!(partial_smt.root(), smt.root());
+        assert_matches!(partial_smt.open(&key_1), Err(MerkleError::UntrackedKey(_)));
+        assert_matches!(partial_smt.open(&key), Ok(_));
+
+        let bytes = partial_smt.to_bytes();
+        let decoded = PartialSmt::read_from_bytes(&bytes).unwrap();
+
+        assert_eq!(partial_smt, decoded);
     }
 }

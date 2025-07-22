@@ -61,7 +61,7 @@ pub struct Smt {
     root: Word,
     // pub(super) for use in PartialSmt.
     pub(super) leaves: Leaves,
-    inner_nodes: InnerNodes,
+    pub(super) inner_nodes: InnerNodes,
 }
 
 impl Smt {
@@ -383,8 +383,12 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
         root: Word,
     ) -> Result<Self, MerkleError> {
         if cfg!(debug_assertions) {
-            let root_node = inner_nodes.get(&NodeIndex::root()).unwrap();
-            assert_eq!(root_node.hash(), root);
+            let root_node_hash = inner_nodes
+                .get(&NodeIndex::root())
+                .map(InnerNode::hash)
+                .unwrap_or(Self::EMPTY_ROOT);
+
+            assert_eq!(root_node_hash, root);
         }
 
         Ok(Self { root, inner_nodes, leaves })
@@ -406,7 +410,11 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
     }
 
     fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
-        self.inner_nodes.insert(index, inner_node)
+        if inner_node == EmptySubtreeRoots::get_inner_node(SMT_DEPTH, index.depth()) {
+            self.remove_inner_node(index)
+        } else {
+            self.inner_nodes.insert(index, inner_node)
+        }
     }
 
     fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
