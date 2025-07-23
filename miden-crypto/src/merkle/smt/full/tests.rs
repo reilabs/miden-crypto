@@ -1,14 +1,17 @@
 use alloc::vec::Vec;
 
+use assert_matches::assert_matches;
+
 use super::{EMPTY_WORD, Felt, LeafIndex, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, Word};
 use crate::{
     ONE, WORD_SIZE,
     merkle::{
-        EmptySubtreeRoots, MerkleStore, MutationSet,
-        smt::{Map, NodeMutation, SparseMerkleTree},
+        EmptySubtreeRoots, MerkleStore, MutationSet, SmtLeafError,
+        smt::{Map, NodeMutation, SparseMerkleTree, full::MAX_LEAF_ENTRIES},
     },
     utils::{Deserializable, Serializable},
 };
+
 // SMT
 // --------------------------------------------------------------------------------------------
 
@@ -714,6 +717,34 @@ fn test_multiple_smt_leaf_serialization_success() {
     let deserialized = SmtLeaf::read_from_bytes(&serialized).unwrap();
 
     assert_eq!(multiple_leaf, deserialized);
+}
+
+/// Test that creating a multiple leaf with exactly MAX_LEAF_ENTRIES works
+/// and that constructing a leaf with MAX_LEAF_ENTRIES + 1 returns an error.
+#[test]
+fn test_max_leaf_entries_validation() {
+    let mut entries = Vec::new();
+
+    for i in 0..MAX_LEAF_ENTRIES {
+        let key = Word::new([ONE, ONE, Felt::new(i as u64), ONE]);
+        let value = Word::new([ONE, ONE, ONE, Felt::new(i as u64)]);
+        entries.push((key, value));
+    }
+
+    let result = SmtLeaf::new_multiple(entries.clone());
+    assert!(result.is_ok(), "Should allow exactly MAX_LEAF_ENTRIES entries");
+
+    // Test that creating a multiple leaf with more than MAX_LEAF_ENTRIES fails
+    let key = Word::new([ONE, ONE, Felt::new(MAX_LEAF_ENTRIES as u64), ONE]);
+    let value = Word::new([ONE, ONE, ONE, Felt::new(MAX_LEAF_ENTRIES as u64)]);
+    entries.push((key, value));
+
+    let error = SmtLeaf::new_multiple(entries).unwrap_err();
+    assert_matches!(
+        error,
+        SmtLeafError::TooManyLeafEntries { .. },
+        "should reject more than MAX_LEAF_ENTRIES entries"
+    );
 }
 
 // HELPERS
