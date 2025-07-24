@@ -12,6 +12,8 @@
 //! reestablished.
 use alloc::vec::Vec;
 
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
 use super::{
     super::{InnerNodeInfo, MerklePath},
     MmrDelta, MmrError, MmrPeaks, MmrProof,
@@ -342,6 +344,24 @@ where
     }
 }
 
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for Mmr {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.forest.write_into(target);
+        self.nodes.write_into(target);
+    }
+}
+
+impl Deserializable for Mmr {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let forest = Forest::read_from(source)?;
+        let nodes = Vec::<Word>::read_from(source)?;
+        Ok(Self { forest, nodes })
+    }
+}
+
 // ITERATOR
 // ===============================================================================================
 
@@ -418,5 +438,29 @@ impl Iterator for MmrNodes<'_> {
         } else {
             None
         }
+    }
+}
+
+// TESTS
+// ================================================================================================
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use winter_utils::{Deserializable, Serializable};
+
+    use crate::{Felt, Word, ZERO, merkle::Mmr};
+
+    #[test]
+    fn test_serialization() {
+        let nodes = (0u64..128u64)
+            .map(|value| Word::new([ZERO, ZERO, ZERO, Felt::new(value)]))
+            .collect::<Vec<_>>();
+
+        let mmr = Mmr::from(nodes);
+        let serialized = mmr.to_bytes();
+        let deserialized = Mmr::read_from_bytes(&serialized).unwrap();
+        assert_eq!(mmr.forest, deserialized.forest);
+        assert_eq!(mmr.nodes, deserialized.nodes);
     }
 }
