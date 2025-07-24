@@ -10,6 +10,10 @@
 - Optimized `Smt::num_entries()` ([#455](https://github.com/0xMiden/crypto/pull/455)).
 - Disallow leaves with more than 2^16 entries ([#455](https://github.com/0xMiden/crypto/pull/455)).
 
+# 0.15.9 (2025-07-24)
+
+- Added serialization for `Mmr` and `Forest` ([#466](https://github.com/0xMiden/crypto/pull/466)).
+
 # 0.15.8 (2025-07-21)
 
 - Added constructor for `SparseMerklePath` that accepts a bitmask and a vector of nodes ([#457](https://github.com/0xMiden/crypto/pull/457)).
