@@ -1,4 +1,4 @@
-# 0.15.9 (TBD)
+# 0.15.9 (2025-07-24)
 
 - Added serialization for `Mmr` and `Forest` ([#466](https://github.com/0xMiden/crypto/pull/466)).
 
