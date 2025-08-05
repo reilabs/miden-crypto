@@ -18,16 +18,14 @@ use crate::merkle::smt::{Map, NodeMutation, NodeMutations};
 mod error;
 pub use error::LargeSmtError;
 
-#[cfg(any(test, feature = "internal"))]
-pub mod test_details;
 #[cfg(test)]
 mod tests;
 
 mod subtree;
-use subtree::Subtree;
+pub use subtree::Subtree;
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, Subtree, StorageError, StorageUpdates};
+pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdates};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 

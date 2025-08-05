@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use core::hash::Hash;
 
-#[cfg(feature = "internal")]
-pub use full::test_details;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex};

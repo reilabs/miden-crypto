@@ -3,8 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DB, DBCompactionStyle, DBCompressionType,
-    DBIteratorWithThreadMode, FlushOptions, IteratorMode, Options, ReadOptions, SliceTransform,
-    WriteBatch, WriteOptions,
+    DBIteratorWithThreadMode, FlushOptions, IteratorMode, Options, ReadOptions, WriteBatch,
+    WriteOptions,
 };
 use winter_utils::{Deserializable, DeserializationError, Serializable};
 
@@ -88,6 +88,8 @@ impl RocksDbStorage {
         db_opts.set_max_open_files(config.max_open_files);
         // Parallelize flush/compaction up to CPU count
         db_opts.set_max_background_jobs(rayon::current_num_threads() as i32);
+        // Maximum WAL size
+        db_opts.set_max_total_wal_size(512 * 1024 * 1024);
 
         // Shared block cache across all column families
         let cache = Cache::new_lru_cache(config.cache_size);
@@ -105,48 +107,54 @@ impl RocksDbStorage {
         // Column family for leaves
         let mut leaves_opts = Options::default();
         leaves_opts.set_block_based_table_factory(&table_opts);
-        // 256 MB memtable size
-        leaves_opts.set_write_buffer_size(256 << 20);
-        // Allow up to 6 memtables (2 flushing)
-        leaves_opts.set_max_write_buffer_number(6);
-        // Merge 2 memtables before flushing
-        leaves_opts.set_min_write_buffer_number_to_merge(2);
+        // 128 MB memtable
+        leaves_opts.set_write_buffer_size(128 << 20);
+        // Allow up to 3 memtables
+        leaves_opts.set_max_write_buffer_number(3);
+        leaves_opts.set_min_write_buffer_number_to_merge(1);
+        // Do not retain flushed memtables in memory
+        leaves_opts.set_max_write_buffer_size_to_maintain(0);
         // Use level-based compaction
         leaves_opts.set_compaction_style(DBCompactionStyle::Level);
-        // 64 MB target file size
-        leaves_opts.set_target_file_size_base(64 << 20);
+        // 512 MB target file size
+        leaves_opts.set_target_file_size_base(512 << 20);
+        leaves_opts.set_target_file_size_multiplier(2);
         // LZ4 compression
         leaves_opts.set_compression_type(DBCompressionType::Lz4);
+        // Set level-based compaction parameters
+        leaves_opts.set_level_zero_file_num_compaction_trigger(8);
 
         // Helper to build subtree CF options with correct prefix length
-        fn subtree_cf(cache: &Cache, prefix_bytes: usize) -> Options {
+        fn subtree_cf(cache: &Cache, bloom_filter_bits: f64) -> Options {
             let mut tbl = BlockBasedOptions::default();
             // Use shared LRU cache for block data
             tbl.set_block_cache(cache);
-            // Bloom filter optimized for prefix-based lookups
-            tbl.set_bloom_filter(16.0, true);
-            // Enable whole-key bloom filtering (better with point lookups)
+            // Set bloom filter for subtree lookups
+            tbl.set_bloom_filter(bloom_filter_bits, false);
+            // Enable whole-key bloom filtering
             tbl.set_whole_key_filtering(true);
-            // Pin L0 filter and index blocks in cache (improves performance)
+            // Pin L0 filter and index blocks in cache
             tbl.set_pin_l0_filter_and_index_blocks_in_cache(true);
 
             let mut opts = Options::default();
-            opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(prefix_bytes));
             opts.set_block_based_table_factory(&tbl);
-            // 64 MB memtable size
-            opts.set_write_buffer_size(64 << 20);
-            // Allow up to 6 memtables
-            opts.set_max_write_buffer_number(6);
-            // Merge 2 memtables before flushing
-            opts.set_min_write_buffer_number_to_merge(2);
+            // 128 MB memtable
+            opts.set_write_buffer_size(128 << 20);
+            opts.set_max_write_buffer_number(3);
+            opts.set_min_write_buffer_number_to_merge(1);
+            // Do not retain flushed memtables in memory
+            opts.set_max_write_buffer_size_to_maintain(0);
             // Use level-based compaction
             opts.set_compaction_style(DBCompactionStyle::Level);
             // Trigger compaction at 4 L0 files
             opts.set_level_zero_file_num_compaction_trigger(4);
-            // 256 MB target file size
-            opts.set_target_file_size_base(256 << 20);
+            // 512 MB target file size
+            opts.set_target_file_size_base(512 << 20);
+            opts.set_target_file_size_multiplier(2);
             // LZ4 compression
             opts.set_compression_type(DBCompressionType::Lz4);
+            // Set level-based compaction parameters
+            opts.set_level_zero_file_num_compaction_trigger(8);
             opts
         }
 
@@ -161,11 +169,11 @@ impl RocksDbStorage {
         // Define column families with tailored options
         let cfs = vec![
             ColumnFamilyDescriptor::new(LEAVES_CF, leaves_opts),
-            ColumnFamilyDescriptor::new(SUBTREE_24_CF, subtree_cf(&cache, 3)),
-            ColumnFamilyDescriptor::new(SUBTREE_32_CF, subtree_cf(&cache, 4)),
-            ColumnFamilyDescriptor::new(SUBTREE_40_CF, subtree_cf(&cache, 5)),
-            ColumnFamilyDescriptor::new(SUBTREE_48_CF, subtree_cf(&cache, 6)),
-            ColumnFamilyDescriptor::new(SUBTREE_56_CF, subtree_cf(&cache, 7)),
+            ColumnFamilyDescriptor::new(SUBTREE_24_CF, subtree_cf(&cache, 8.0)),
+            ColumnFamilyDescriptor::new(SUBTREE_32_CF, subtree_cf(&cache, 10.0)),
+            ColumnFamilyDescriptor::new(SUBTREE_40_CF, subtree_cf(&cache, 10.0)),
+            ColumnFamilyDescriptor::new(SUBTREE_48_CF, subtree_cf(&cache, 12.0)),
+            ColumnFamilyDescriptor::new(SUBTREE_56_CF, subtree_cf(&cache, 12.0)),
             ColumnFamilyDescriptor::new(METADATA_CF, metadata_opts),
             ColumnFamilyDescriptor::new(DEPTH_24_CF, depth24_opts),
         ];

@@ -22,8 +22,6 @@ mod sparse_path;
 pub use sparse_path::{SparseMerklePath, SparseValuePath};
 
 mod smt;
-#[cfg(feature = "internal")]
-pub use smt::test_details;
 pub use smt::{
     InnerNode, LeafIndex, MutationSet, NodeMutation, PartialSmt, SMT_DEPTH, SMT_MAX_DEPTH,
     SMT_MIN_DEPTH, SimpleSmt, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError,

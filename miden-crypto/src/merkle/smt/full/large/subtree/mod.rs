@@ -1,29 +1,26 @@
 use alloc::vec::Vec;
 
-use super::{InnerNode, InnerNodeInfo, NodeIndex, SUBTREE_DEPTH};
-use crate::utils::{Deserializable, DeserializationError};
+use super::{EmptySubtreeRoots, InnerNode, InnerNodeInfo, NodeIndex, SMT_DEPTH, SUBTREE_DEPTH};
+use crate::{Word, merkle::smt::Map, utils::DeserializationError};
 
 #[cfg(test)]
 mod tests;
-
-const MAX_SIZE: usize = (1 << SUBTREE_DEPTH) - 1;
 
 /// Represents a complete 8-depth subtree that can be serialized into a single RocksDB entry.
 #[derive(Debug, Clone)]
 pub struct Subtree {
     root_index: NodeIndex,
-    nodes: [Option<InnerNode>; MAX_SIZE],
+    nodes: Map<u8, InnerNode>,
 }
 
 impl Subtree {
-    const NODE_SIZE: usize = 64;
-    const BITMASK_SIZE: usize = 32;
+    const HASH_SIZE: usize = 32;
+    const BITMASK_SIZE: usize = 64;
+    const MAX_NODES: u8 = 255;
+    const BITS_PER_NODE: usize = 2;
 
     pub fn new(root_index: NodeIndex) -> Self {
-        Self {
-            root_index,
-            nodes: [const { None }; MAX_SIZE],
-        }
+        Self { root_index, nodes: Map::new() }
     }
 
     pub fn root_index(&self) -> NodeIndex {
@@ -31,7 +28,7 @@ impl Subtree {
     }
 
     pub fn len(&self) -> usize {
-        self.nodes.iter().filter(|n| n.is_some()).count()
+        self.nodes.len()
     }
 
     pub fn insert_inner_node(
@@ -40,83 +37,116 @@ impl Subtree {
         inner_node: InnerNode,
     ) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        self.nodes[local_index as usize].replace(inner_node)
+        self.nodes.insert(local_index, inner_node)
     }
 
     pub fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        self.nodes[local_index as usize].take()
+        self.nodes.remove(&local_index)
     }
 
     pub fn get_inner_node(&self, index: NodeIndex) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
-        self.nodes[local_index as usize].clone()
+        self.nodes.get(&local_index).cloned()
     }
 
     pub fn to_vec(&self) -> Vec<u8> {
-        // Create and write bitmask
+        let mut data = Vec::with_capacity(self.len() * Self::HASH_SIZE);
         let mut bitmask = [0u8; Self::BITMASK_SIZE];
-        let mut present_nodes = 0;
-        for (_local_index, node) in self.nodes.iter().enumerate() {
-            if node.is_some() {
-                bitmask[_local_index / 8] |= 1 << (_local_index % 8);
-                present_nodes += 1;
+
+        for local_index in 0..Self::MAX_NODES {
+            if let Some(node) = self.nodes.get(&local_index) {
+                let bit_offset = (local_index as usize) * Self::BITS_PER_NODE;
+                let node_depth_in_subtree = Self::local_index_to_depth(local_index);
+                let child_depth = self.root_index.depth() + node_depth_in_subtree + 1;
+                let empty_hash = *EmptySubtreeRoots::entry(SMT_DEPTH, child_depth);
+
+                if node.left != empty_hash {
+                    Self::set_bit(&mut bitmask, bit_offset);
+                    data.extend_from_slice(&node.left.as_bytes());
+                }
+
+                if node.right != empty_hash {
+                    Self::set_bit(&mut bitmask, bit_offset + 1);
+                    data.extend_from_slice(&node.right.as_bytes());
+                }
             }
         }
-        // Pre-allocate the exact size needed
-        let mut buf = Vec::with_capacity(Self::BITMASK_SIZE + present_nodes * Self::NODE_SIZE);
-        buf.extend_from_slice(&bitmask);
 
-        // Write node data in order
-        for node in self.nodes.iter().flatten() {
-            buf.extend_from_slice(&node.left.as_bytes());
-            buf.extend_from_slice(&node.right.as_bytes());
-        }
+        let mut result = Vec::with_capacity(Self::BITMASK_SIZE + data.len());
+        result.extend_from_slice(&bitmask);
+        result.extend_from_slice(&data);
+        result
+    }
 
-        buf
+    #[inline]
+    fn set_bit(bitmask: &mut [u8], bit_offset: usize) {
+        bitmask[bit_offset / 8] |= 1 << (bit_offset % 8);
+    }
+
+    #[inline]
+    fn get_bit(bitmask: &[u8], bit_offset: usize) -> bool {
+        (bitmask[bit_offset / 8] >> (bit_offset % 8)) & 1 != 0
     }
 
     pub fn from_vec(root_index: NodeIndex, data: &[u8]) -> Result<Self, DeserializationError> {
         if data.len() < Self::BITMASK_SIZE {
             return Err(DeserializationError::InvalidValue("Subtree data too short".into()));
         }
-        let (bitmask, node_data) = data.split_at(Self::BITMASK_SIZE);
-        let present_nodes: usize = bitmask.iter().map(|&byte| byte.count_ones() as usize).sum();
-        if node_data.len() != present_nodes * Self::NODE_SIZE {
-            return Err(DeserializationError::InvalidValue("Invalid node data length".into()));
+        let (bitmask, hash_data) = data.split_at(Self::BITMASK_SIZE);
+        let present_hashes: usize = bitmask.iter().map(|&byte| byte.count_ones() as usize).sum();
+        if hash_data.len() != present_hashes * Self::HASH_SIZE {
+            return Err(DeserializationError::InvalidValue("Invalid hash data length".into()));
         }
 
-        let mut nodes = [const { None }; MAX_SIZE];
-        let mut node_data_chunks = node_data.chunks_exact(Self::NODE_SIZE);
-        bitmask
-            .iter()
-            .enumerate()
-            .flat_map(|(byte_idx, &byte_val)| {
-                (0..8_u8).filter_map(move |bit_pos_in_byte| {
-                    if (byte_val >> bit_pos_in_byte) & 1 != 0 {
-                        let local_index = (byte_idx as u8 * 8) + bit_pos_in_byte;
-                        Some(local_index)
-                    } else {
-                        None
-                    }
-                })
-            })
-            .try_for_each(|local_index| -> Result<(), DeserializationError> {
-                let node_bytes = node_data_chunks.next().ok_or_else(|| {
-                    DeserializationError::InvalidValue(
-                        "Bitmask indicates more nodes than present in node_data".into(),
-                    )
-                })?;
+        let mut nodes = Map::new();
+        let mut hash_chunks = hash_data.chunks_exact(Self::HASH_SIZE);
 
-                let node = InnerNode::read_from_bytes(node_bytes)?;
-                nodes[local_index as usize].replace(node);
-                Ok(())
-            })?;
+        // Process each potential node position
+        for local_index in 0..Self::MAX_NODES {
+            let bit_offset = (local_index as usize) * Self::BITS_PER_NODE;
+            let has_left = Self::get_bit(bitmask, bit_offset);
+            let has_right = Self::get_bit(bitmask, bit_offset + 1);
 
-        // Ensure all expected node data was consumed
-        if node_data_chunks.next().is_some() {
+            if has_left || has_right {
+                // Calculate depth for empty hash lookup
+                let node_depth_in_subtree = Self::local_index_to_depth(local_index);
+                let child_depth = root_index.depth() + node_depth_in_subtree + 1;
+                let empty_hash = *EmptySubtreeRoots::entry(SMT_DEPTH, child_depth);
+
+                // Get left child hash
+                let left_hash = if has_left {
+                    let hash_bytes = hash_chunks.next().ok_or_else(|| {
+                        DeserializationError::InvalidValue("Missing left hash data".into())
+                    })?;
+                    Word::try_from(hash_bytes).map_err(|_| {
+                        DeserializationError::InvalidValue("Invalid left hash format".into())
+                    })?
+                } else {
+                    empty_hash
+                };
+
+                // Get right child hash
+                let right_hash = if has_right {
+                    let hash_bytes = hash_chunks.next().ok_or_else(|| {
+                        DeserializationError::InvalidValue("Missing right hash data".into())
+                    })?;
+                    Word::try_from(hash_bytes).map_err(|_| {
+                        DeserializationError::InvalidValue("Invalid right hash format".into())
+                    })?
+                } else {
+                    empty_hash
+                };
+
+                let inner_node = InnerNode { left: left_hash, right: right_hash };
+                nodes.insert(local_index, inner_node);
+            }
+        }
+
+        // Ensure all hash data was consumed
+        if hash_chunks.next().is_some() {
             return Err(DeserializationError::InvalidValue(
-                "Node data is longer than indicated by the bitmask".into(),
+                "Hash data is longer than indicated by bitmask".into(),
             ));
         }
 
@@ -165,13 +195,18 @@ impl Subtree {
         self.len() == 0
     }
 
+    /// Convert local index to depth within subtree
+    #[inline]
+    const fn local_index_to_depth(local_index: u8) -> u8 {
+        let n = local_index as u16 + 1;
+        (u16::BITS as u8 - 1) - n.leading_zeros() as u8
+    }
+
     pub fn iter_inner_node_info(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
-        self.nodes.iter().filter_map(|inner_node_ref| {
-            inner_node_ref.as_ref().map(|inner_node| InnerNodeInfo {
-                value: inner_node.hash(),
-                left: inner_node.left,
-                right: inner_node.right,
-            })
+        self.nodes.values().map(|inner_node_ref| InnerNodeInfo {
+            value: inner_node_ref.hash(),
+            left: inner_node_ref.left,
+            right: inner_node_ref.right,
         })
     }
 }

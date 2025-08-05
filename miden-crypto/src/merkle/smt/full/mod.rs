@@ -30,8 +30,6 @@ pub use concurrent::{SubtreeLeaf, build_subtree_for_bench};
 
 #[cfg(test)]
 mod tests;
-#[cfg(feature = "internal")]
-pub use large::test_details;
 
 // CONSTANTS
 // ================================================================================================

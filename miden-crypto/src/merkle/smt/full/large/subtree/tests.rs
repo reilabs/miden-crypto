@@ -156,7 +156,7 @@ fn test_serialize_deserialize_subtree_with_nodes() {
 
     // Test serialization
     let serialized = subtree.to_vec();
-    let expected_size = Subtree::BITMASK_SIZE + 3 * Subtree::NODE_SIZE;
+    let expected_size = Subtree::BITMASK_SIZE + 6 * Subtree::HASH_SIZE;
     assert_eq!(serialized.len(), expected_size, "Serialized size should be bitmask + 3 nodes");
 
     // Test deserialization
@@ -187,15 +187,14 @@ fn test_serialize_deserialize_subtree_with_nodes() {
     // Verify bitmask correctness
     let (bitmask_bytes, _node_data) = serialized.split_at(Subtree::BITMASK_SIZE);
 
-    // local_idx 0: byte 0, bit 0
-    // local_idx 1: byte 0, bit 1
-    // local_idx 254: byte 31, bit 6
-    assert_eq!(bitmask_bytes[0], 0b0000_0011, "First byte should have bits 0 and 1 set");
-    assert!(
-        bitmask_bytes[1..31].iter().all(|&byte| byte == 0),
-        "Middle bytes should all be zero"
-    );
-    assert_eq!(bitmask_bytes[31], 1 << 6, "Last byte should have bit 6 set for local index 254");
+    // byte 0: bits 0-3 must be set
+    assert_eq!(bitmask_bytes[0], 0x0f, "byte 0 must have bits 0-3 set");
+
+    // bytes 1‥=62 must be zero
+    assert!(bitmask_bytes[1..63].iter().all(|&b| b == 0), "bytes 1‥62 must be zero");
+
+    // byte 63: bits 4 & 5 must be set
+    assert_eq!(bitmask_bytes[63], 0x30, "byte 63 must have bits 4 & 5 set");
 }
 
 /// Tests global to local index conversion with zero-based subtree root
