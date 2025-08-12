@@ -101,7 +101,7 @@ fn test_sorted_pairs_to_leaves() {
 }
 
 // Helper for the below tests.
-pub(crate) fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
+fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
     (0..pair_count)
         .map(|i| {
             let leaf_index = ((i as f64 / pair_count as f64) * (pair_count as f64)) as u64;
@@ -112,7 +112,7 @@ pub(crate) fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
         .collect()
 }
 
-pub(crate) fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Word)> {
+fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Word)> {
     const REMOVAL_PROBABILITY: f64 = 0.2;
     let mut rng = rng();
     // Assertion to ensure input keys are unique

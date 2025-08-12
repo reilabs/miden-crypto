@@ -27,7 +27,7 @@ pub use smt::{
     SMT_MIN_DEPTH, SimpleSmt, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError,
 };
 #[cfg(feature = "concurrent")]
-pub use smt::{LargeSmt, LargeSmtError, MemoryStorage, Subtree};
+pub use smt::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
 #[cfg(feature = "rocksdb")]
 pub use smt::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "internal")]
