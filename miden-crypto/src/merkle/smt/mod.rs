@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use core::hash::Hash;
 
-#[cfg(feature = "internal")]
-pub use full::test_details;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex};
@@ -10,7 +8,7 @@ use crate::{EMPTY_WORD, Felt, Map, Word, hash::rpo::Rpo256};
 
 mod full;
 #[cfg(feature = "concurrent")]
-pub use full::{LargeSmt, LargeSmtError, MemoryStorage};
+pub use full::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
 #[cfg(feature = "rocksdb")]
 pub use full::{RocksDbConfig, RocksDbStorage};
 pub use full::{SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};

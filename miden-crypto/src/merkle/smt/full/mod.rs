@@ -18,7 +18,7 @@ use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 #[cfg(feature = "concurrent")]
 mod large;
 #[cfg(feature = "concurrent")]
-pub use large::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage};
+pub use large::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
 #[cfg(feature = "rocksdb")]
 pub use large::{RocksDbConfig, RocksDbStorage};
 
@@ -30,8 +30,6 @@ pub use concurrent::{SubtreeLeaf, build_subtree_for_bench};
 
 #[cfg(test)]
 mod tests;
-#[cfg(feature = "internal")]
-pub use large::test_details;
 
 // CONSTANTS
 // ================================================================================================
