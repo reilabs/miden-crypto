@@ -13,6 +13,7 @@
 - [BREAKING] Use `SparseMerklePath` in SMT proofs for better memory efficiency ([#477](https://github.com/0xMiden/crypto/pull/477)).
 - [BREAKING] Rename `SparseValuePath` to `SimpleSmtProof` ([#477](https://github.com/0xMiden/crypto/pull/477)).
 - Validate `NodeIndex` depth ([#482](https://github.com/0xMiden/crypto/pull/482)).
+- [BREAKING] Rename `ValuePath` to `MerkleProof` ([#483](https://github.com/0xMiden/crypto/pull/483)).
 
 # 0.15.9 (2025-07-24)
 
