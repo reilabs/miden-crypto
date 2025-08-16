@@ -3,16 +3,16 @@ use core::hash::Hash;
 
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
-use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex};
-use crate::{EMPTY_WORD, Felt, Word, hash::rpo::Rpo256};
+use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
+use crate::{EMPTY_WORD, Felt, Map, Word, hash::rpo::Rpo256};
 
 mod full;
-pub use full::{SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
+pub use full::{MAX_LEAF_ENTRIES, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
 #[cfg(feature = "internal")]
 pub use full::{SubtreeLeaf, build_subtree_for_bench};
 
 mod simple;
-pub use simple::SimpleSmt;
+pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
 pub use partial::PartialSmt;
@@ -29,14 +29,9 @@ pub const SMT_MAX_DEPTH: u8 = 64;
 // SPARSE MERKLE TREE
 // ================================================================================================
 
-/// A map whose keys are not guaranteed to be ordered.
-#[cfg(feature = "smt_hashmaps")]
-type UnorderedMap<K, V> = hashbrown::HashMap<K, V>;
-#[cfg(not(feature = "smt_hashmaps"))]
-type UnorderedMap<K, V> = alloc::collections::BTreeMap<K, V>;
-type InnerNodes = UnorderedMap<NodeIndex, InnerNode>;
-type Leaves<T> = UnorderedMap<u64, T>;
-type NodeMutations = UnorderedMap<NodeIndex, NodeMutation>;
+type InnerNodes = Map<NodeIndex, InnerNode>;
+type Leaves<T> = Map<u64, T>;
+type NodeMutations = Map<NodeIndex, NodeMutation>;
 
 /// An abstract description of a sparse Merkle tree.
 ///
@@ -76,12 +71,17 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     // PROVIDED METHODS
     // ---------------------------------------------------------------------------------------------
 
-    /// Returns a [MerklePath] to the specified key.
+    /// Returns a [SparseMerklePath] to the specified key.
     ///
     /// Mostly this is an implementation detail of [`Self::open()`].
-    fn get_path(&self, key: &Self::Key) -> MerklePath {
+    fn get_path(&self, key: &Self::Key) -> SparseMerklePath {
         let index = NodeIndex::from(Self::key_to_leaf_index(key));
-        index.proof_indices().map(|index| self.get_node_hash(index)).collect()
+
+        // SAFETY: this is guaranteed to have depth <= SMT_MAX_DEPTH
+        SparseMerklePath::from_sized_iter(
+            index.proof_indices().map(|index| self.get_node_hash(index)),
+        )
+        .expect("failed to convert to SparseMerklePath")
     }
 
     /// Get the hash of a node at an arbitrary index, including the root or leaf hashes.
@@ -99,8 +99,8 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
         if index_is_right { right } else { left }
     }
 
-    /// Returns an opening of the leaf associated with `key`. Conceptually, an opening is a Merkle
-    /// path to the leaf, as well as the leaf itself.
+    /// Returns an opening of the leaf associated with `key`. Conceptually, an opening is a sparse
+    /// Merkle path to the leaf, as well as the leaf itself.
     fn open(&self, key: &Self::Key) -> Self::Opening {
         let leaf = self.get_leaf(key);
         let merkle_path = self.get_path(key);
@@ -114,12 +114,12 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     ///
     /// This also recomputes all hashes between the leaf (associated with the key) and the root,
     /// updating the root itself.
-    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Self::Value {
-        let old_value = self.insert_value(key.clone(), value.clone()).unwrap_or(Self::EMPTY_VALUE);
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Result<Self::Value, MerkleError> {
+        let old_value = self.insert_value(key.clone(), value.clone())?.unwrap_or(Self::EMPTY_VALUE);
 
         // if the old value and new value are the same, there is nothing to update
         if value == old_value {
-            return value;
+            return Ok(value);
         }
 
         let leaf = self.get_leaf(&key);
@@ -130,7 +130,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
 
         self.recompute_nodes_from_index_to_root(node_index, Self::hash_leaf(&leaf));
 
-        old_value
+        Ok(old_value)
     }
 
     /// Recomputes the branch nodes (including the root) from `index` all the way to the root.
@@ -171,10 +171,14 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// be queried with [`MutationSet::root()`]. Once a mutation set is returned,
     /// [`SparseMerkleTree::apply_mutations()`] can be called in order to commit these changes to
     /// the Merkle tree, or [`drop()`] to discard them.
+    ///
+    /// # Errors
+    /// If mutations would exceed [`MAX_LEAF_ENTRIES`] (1024 entries) in a leaf, returns
+    /// [`MerkleError::TooManyLeafEntries`].
     fn compute_mutations(
         &self,
         kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
-    ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
+    ) -> Result<MutationSet<DEPTH, Self::Key, Self::Value>, MerkleError> {
         self.compute_mutations_sequential(kv_pairs)
     }
 
@@ -183,11 +187,11 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     fn compute_mutations_sequential(
         &self,
         kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
-    ) -> MutationSet<DEPTH, Self::Key, Self::Value> {
+    ) -> Result<MutationSet<DEPTH, Self::Key, Self::Value>, MerkleError> {
         use NodeMutation::*;
 
         let mut new_root = self.root();
-        let mut new_pairs: UnorderedMap<Self::Key, Self::Value> = Default::default();
+        let mut new_pairs: Map<Self::Key, Self::Value> = Default::default();
         let mut node_mutations: NodeMutations = Default::default();
 
         for (key, value) in kv_pairs {
@@ -215,10 +219,17 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
                     // none at all), as multi-leaves should be really rare.
                     let existing_leaf = acc.clone();
                     self.construct_prospective_leaf(existing_leaf, k, v)
+                        .expect("current leaf should be valid")
                 })
             };
 
-            let new_leaf = self.construct_prospective_leaf(old_leaf, &key, &value);
+            let new_leaf =
+                self.construct_prospective_leaf(old_leaf, &key, &value).map_err(|e| match e {
+                    SmtLeafError::TooManyLeafEntries { actual } => {
+                        MerkleError::TooManyLeafEntries { actual }
+                    },
+                    other => panic!("unexpected SmtLeaf::insert error: {:?}", other),
+                })?;
 
             let mut new_child_hash = Self::hash_leaf(&new_leaf);
 
@@ -262,12 +273,12 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
             new_pairs.insert(key, value);
         }
 
-        MutationSet {
+        Ok(MutationSet {
             old_root: self.root(),
             new_root,
             node_mutations,
             new_pairs,
-        }
+        })
     }
 
     /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
@@ -278,6 +289,8 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
     /// the `mutations` were computed against, and the second item is the actual current root of
     /// this tree.
+    /// If mutations would exceed [`MAX_LEAF_ENTRIES`] (1024 entries) in a leaf, returns
+    /// [`MerkleError::TooManyLeafEntries`].
     fn apply_mutations(
         &mut self,
         mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
@@ -314,7 +327,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
         }
 
         for (key, value) in new_pairs {
-            self.insert_value(key, value);
+            self.insert_value(key, value)?;
         }
 
         self.set_root(new_root);
@@ -373,12 +386,15 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
             }
         }
 
-        let mut reverse_pairs = UnorderedMap::new();
+        let mut reverse_pairs = Map::new();
         for (key, value) in new_pairs {
-            if let Some(old_value) = self.insert_value(key.clone(), value) {
-                reverse_pairs.insert(key, old_value);
-            } else {
-                reverse_pairs.insert(key, Self::EMPTY_VALUE);
+            match self.insert_value(key.clone(), value)? {
+                Some(old_value) => {
+                    reverse_pairs.insert(key, old_value);
+                },
+                None => {
+                    reverse_pairs.insert(key, Self::EMPTY_VALUE);
+                },
             }
         }
 
@@ -421,7 +437,11 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode>;
 
     /// Inserts a leaf node, and returns the value at the key if already exists
-    fn insert_value(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value>;
+    fn insert_value(
+        &mut self,
+        key: Self::Key,
+        value: Self::Value,
+    ) -> Result<Option<Self::Value>, MerkleError>;
 
     /// Returns the value at the specified key. Recall that by definition, any key that hasn't been
     /// updated is associated with [`Self::EMPTY_VALUE`].
@@ -444,20 +464,24 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// Because this method is for a prospective key-value insertion into a specific leaf,
     /// `existing_leaf` must have the same leaf index as `key` (as determined by
     /// [`SparseMerkleTree::key_to_leaf_index()`]), or the result will be meaningless.
+    ///
+    /// # Errors
+    /// If inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024 entries) in a leaf,
+    /// returns [`SmtLeafError::TooManyLeafEntries`].
     fn construct_prospective_leaf(
         &self,
         existing_leaf: Self::Leaf,
         key: &Self::Key,
         value: &Self::Value,
-    ) -> Self::Leaf;
+    ) -> Result<Self::Leaf, SmtLeafError>;
 
     /// Maps a key to a leaf index
     fn key_to_leaf_index(key: &Self::Key) -> LeafIndex<DEPTH>;
 
-    /// Maps a (MerklePath, Self::Leaf) to an opening.
+    /// Maps a (SparseMerklePath, Self::Leaf) to an opening.
     ///
     /// The length `path` is guaranteed to be equal to `DEPTH`
-    fn path_and_leaf_to_opening(path: MerklePath, leaf: Self::Leaf) -> Self::Opening;
+    fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: Self::Leaf) -> Self::Opening;
 }
 
 // INNER NODE
@@ -581,10 +605,10 @@ pub struct MutationSet<const DEPTH: u8, K: Eq + Hash, V> {
     /// corresponds to a [`SparseMerkleTree::remove_inner_node()`] call.
     node_mutations: NodeMutations,
     /// The set of top-level key-value pairs we're prospectively adding to the tree, including
-    /// adding empty values. The "effective" value for a key is the value in this BTreeMap, falling
+    /// adding empty values. The "effective" value for a key is the value in this Map, falling
     /// back to the existing value in the Merkle tree. Each entry corresponds to a
     /// [`SparseMerkleTree::insert_value()`] call.
-    new_pairs: UnorderedMap<K, V>,
+    new_pairs: Map<K, V>,
     /// The calculated root for the Merkle tree, given these mutations. Publicly retrievable with
     /// [`MutationSet::root()`]. Corresponds to a [`SparseMerkleTree::set_root()`]. call.
     new_root: Word,
@@ -609,7 +633,7 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
 
     /// Returns the set of top-level key-value pairs that need to be added, updated or deleted
     /// (i.e. set to `EMPTY_WORD`).
-    pub fn new_pairs(&self) -> &UnorderedMap<K, V> {
+    pub fn new_pairs(&self) -> &Map<K, V> {
         &self.new_pairs
     }
 }
@@ -706,7 +730,7 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
 
         let num_new_pairs = source.read_usize()?;
         let new_pairs = source.read_many(num_new_pairs)?;
-        let new_pairs = UnorderedMap::from_iter(new_pairs);
+        let new_pairs = Map::from_iter(new_pairs);
 
         Ok(Self {
             old_root,
