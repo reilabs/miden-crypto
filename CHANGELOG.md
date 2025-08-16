@@ -1,4 +1,6 @@
-## 0.16.0 (TBD)
+## 0.17.0 (TBD)
+
+## 0.16.0 (2025-08-15)
 
 - [BREAKING] Incremented MSRV to 1.88.
 - Added implementation of Poseidon2 hash function ([#429](https://github.com/0xMiden/crypto/issues/429)).
