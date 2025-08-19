@@ -2,7 +2,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, Felt, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex,
-    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, SparseMerkleTree, Word,
+    MerkleError, MutationSet, NodeIndex, Rpo256, SparseMerklePath, SparseMerkleTree, Word,
 };
 
 mod error;
@@ -39,6 +39,9 @@ mod tests;
 /// All leaves in this SMT are located at depth 64.
 pub const SMT_DEPTH: u8 = 64;
 
+/// The maximum number of entries allowed in a multiple leaf.
+pub const MAX_LEAF_ENTRIES: usize = 1024;
+
 // SMT
 // ================================================================================================
 
@@ -58,6 +61,7 @@ type Leaves = super::Leaves<SmtLeaf>;
 pub struct Smt {
     root: Word,
     // pub(super) for use in PartialSmt.
+    pub(super) num_entries: usize,
     pub(super) leaves: Leaves,
     pub(super) inner_nodes: InnerNodes,
 }
@@ -79,6 +83,7 @@ impl Smt {
 
         Self {
             root,
+            num_entries: 0,
             inner_nodes: Default::default(),
             leaves: Default::default(),
         }
@@ -92,7 +97,9 @@ impl Smt {
     /// All leaves omitted from the entries list are set to [Self::EMPTY_VALUE].
     ///
     /// # Errors
-    /// Returns an error if the provided entries contain multiple values for the same key.
+    /// Returns an error if:
+    /// - the provided entries contain multiple values for the same key.
+    /// - inserting a key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024 entries) in a leaf.
     pub fn with_entries(
         entries: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<Self, MerkleError> {
@@ -111,6 +118,10 @@ impl Smt {
     ///
     /// This only applies if the "concurrent" feature is enabled. Without the feature, the behavior
     /// is equivalent to `with_entiries`.
+    ///
+    /// # Errors
+    /// Returns an error if inserting a key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
+    /// entries) in a leaf.
     pub fn with_sorted_entries(
         entries: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<Self, MerkleError> {
@@ -130,7 +141,9 @@ impl Smt {
     /// All leaves omitted from the entries list are set to [Self::EMPTY_VALUE].
     ///
     /// # Errors
-    /// Returns an error if the provided entries contain multiple values for the same key.
+    /// Returns an error if:
+    /// - the provided entries contain multiple values for the same key.
+    /// - inserting a key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024 entries) in a leaf.
     #[cfg(any(not(feature = "concurrent"), fuzzing, test))]
     fn with_entries_sequential(
         entries: impl IntoIterator<Item = (Word, Word)>,
@@ -145,7 +158,7 @@ impl Smt {
         let mut key_set_to_zero = BTreeSet::new();
 
         for (key, value) in entries {
-            let old_value = tree.insert(key, value);
+            let old_value = tree.insert(key, value)?;
 
             if old_value != EMPTY_WORD || key_set_to_zero.contains(&key) {
                 return Err(MerkleError::DuplicateValuesForIndex(
@@ -198,11 +211,8 @@ impl Smt {
     ///
     /// Note that this may return a different value from [Self::num_leaves()] as a single leaf may
     /// contain more than one key-value pair.
-    ///
-    /// Also note that this is currently an expensive operation as counting the number of
-    /// entries requires iterating over all leaves of the tree.
     pub fn num_entries(&self) -> usize {
-        self.entries().count()
+        self.num_entries
     }
 
     /// Returns the leaf to which `key` maps
@@ -260,7 +270,11 @@ impl Smt {
     ///
     /// This also recomputes all hashes between the leaf (associated with the key) and the root,
     /// updating the root itself.
-    pub fn insert(&mut self, key: Word, value: Word) -> Word {
+    ///
+    /// # Errors
+    /// Returns an error if inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
+    /// entries) in the leaf.
+    pub fn insert(&mut self, key: Word, value: Word) -> Result<Word, MerkleError> {
         <Self as SparseMerkleTree<SMT_DEPTH>>::insert(self, key, value)
     }
 
@@ -279,15 +293,15 @@ impl Smt {
     /// # use miden_crypto::merkle::{Smt, EmptySubtreeRoots, SMT_DEPTH};
     /// let mut smt = Smt::new();
     /// let pair = (Word::default(), Word::default());
-    /// let mutations = smt.compute_mutations(vec![pair]);
+    /// let mutations = smt.compute_mutations(vec![pair]).unwrap();
     /// assert_eq!(mutations.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
-    /// smt.apply_mutations(mutations);
+    /// smt.apply_mutations(mutations).unwrap();
     /// assert_eq!(smt.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
     /// ```
     pub fn compute_mutations(
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
-    ) -> MutationSet<SMT_DEPTH, Word, Word> {
+    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, MerkleError> {
         #[cfg(feature = "concurrent")]
         {
             self.compute_mutations_concurrent(kv_pairs)
@@ -334,17 +348,32 @@ impl Smt {
 
     /// Inserts `value` at leaf index pointed to by `key`. `value` is guaranteed to not be the empty
     /// value, such that this is indeed an insertion.
-    fn perform_insert(&mut self, key: Word, value: Word) -> Option<Word> {
+    ///
+    /// # Errors
+    /// Returns an error if inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
+    /// entries) in the leaf.
+    fn perform_insert(&mut self, key: Word, value: Word) -> Result<Option<Word>, MerkleError> {
         debug_assert_ne!(value, Self::EMPTY_VALUE);
 
         let leaf_index: LeafIndex<SMT_DEPTH> = Self::key_to_leaf_index(&key);
 
         match self.leaves.get_mut(&leaf_index.value()) {
-            Some(leaf) => leaf.insert(key, value),
+            Some(leaf) => {
+                let prev_entries = leaf.num_entries();
+                let result = leaf.insert(key, value).map_err(|e| match e {
+                    SmtLeafError::TooManyLeafEntries { actual } => {
+                        MerkleError::TooManyLeafEntries { actual }
+                    },
+                    other => panic!("unexpected SmtLeaf::insert error: {:?}", other),
+                })?;
+                let current_entries = leaf.num_entries();
+                self.num_entries += current_entries - prev_entries;
+                Ok(result)
+            },
             None => {
                 self.leaves.insert(leaf_index.value(), SmtLeaf::Single((key, value)));
-
-                None
+                self.num_entries += 1;
+                Ok(None)
             },
         }
     }
@@ -354,7 +383,10 @@ impl Smt {
         let leaf_index: LeafIndex<SMT_DEPTH> = Self::key_to_leaf_index(&key);
 
         if let Some(leaf) = self.leaves.get_mut(&leaf_index.value()) {
+            let prev_entries = leaf.num_entries();
             let (old_value, is_empty) = leaf.remove(key);
+            let current_entries = leaf.num_entries();
+            self.num_entries -= prev_entries - current_entries;
             if is_empty {
                 self.leaves.remove(&leaf_index.value());
             }
@@ -388,8 +420,8 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
 
             assert_eq!(root_node_hash, root);
         }
-
-        Ok(Self { root, inner_nodes, leaves })
+        let num_entries = leaves.values().map(|leaf| leaf.num_entries()).sum();
+        Ok(Self { root, inner_nodes, leaves, num_entries })
     }
 
     fn root(&self) -> Word {
@@ -419,12 +451,16 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
         self.inner_nodes.remove(&index)
     }
 
-    fn insert_value(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
+    fn insert_value(
+        &mut self,
+        key: Self::Key,
+        value: Self::Value,
+    ) -> Result<Option<Self::Value>, MerkleError> {
         // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
         if value != Self::EMPTY_VALUE {
             self.perform_insert(key, value)
         } else {
-            self.perform_remove(key)
+            Ok(self.perform_remove(key))
         }
     }
 
@@ -455,19 +491,19 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
         mut existing_leaf: SmtLeaf,
         key: &Word,
         value: &Word,
-    ) -> SmtLeaf {
+    ) -> Result<SmtLeaf, SmtLeafError> {
         debug_assert_eq!(existing_leaf.index(), Self::key_to_leaf_index(key));
 
         match existing_leaf {
-            SmtLeaf::Empty(_) => SmtLeaf::new_single(*key, *value),
+            SmtLeaf::Empty(_) => Ok(SmtLeaf::new_single(*key, *value)),
             _ => {
                 if *value != EMPTY_WORD {
-                    existing_leaf.insert(*key, *value);
+                    existing_leaf.insert(*key, *value)?;
                 } else {
                     existing_leaf.remove(*key);
                 }
 
-                existing_leaf
+                Ok(existing_leaf)
             },
         }
     }
@@ -477,7 +513,7 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
         LeafIndex::new_max_depth(most_significant_felt.as_int())
     }
 
-    fn path_and_leaf_to_opening(path: MerklePath, leaf: SmtLeaf) -> SmtProof {
+    fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: SmtLeaf) -> SmtProof {
         SmtProof::new_unchecked(path, leaf)
     }
 }

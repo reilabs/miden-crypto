@@ -130,7 +130,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
         let test_value = Word::new([ONE, ONE, ONE, Felt::new((size + i) as u64)]);
 
         let now = Instant::now();
-        tree.insert(test_key, test_value);
+        tree.insert(test_key, test_value)?;
         let elapsed = now.elapsed();
         insertion_times.push(elapsed.as_micros());
     }

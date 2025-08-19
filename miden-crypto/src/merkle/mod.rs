@@ -16,15 +16,16 @@ mod merkle_tree;
 pub use merkle_tree::{MerkleTree, path_to_text, tree_to_text};
 
 mod path;
-pub use path::{MerklePath, RootPath, ValuePath};
+pub use path::{MerklePath, MerkleProof, RootPath};
 
 mod sparse_path;
-pub use sparse_path::{SparseMerklePath, SparseValuePath};
+pub use sparse_path::SparseMerklePath;
 
 mod smt;
 pub use smt::{
-    InnerNode, LeafIndex, MutationSet, NodeMutation, PartialSmt, SMT_DEPTH, SMT_MAX_DEPTH,
-    SMT_MIN_DEPTH, SimpleSmt, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError,
+    InnerNode, LeafIndex, MAX_LEAF_ENTRIES, MutationSet, NodeMutation, PartialSmt, SMT_DEPTH,
+    SMT_MAX_DEPTH, SMT_MIN_DEPTH, SimpleSmt, SimpleSmtProof, Smt, SmtLeaf, SmtLeafError, SmtProof,
+    SmtProofError,
 };
 #[cfg(feature = "concurrent")]
 pub use smt::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
