@@ -35,7 +35,7 @@ fn rocksdb_sanity_insert_and_get() {
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let val = Word::new([ONE; WORD_SIZE]);
 
-    let prev = smt.insert(key, val);
+    let prev = smt.insert(key, val).unwrap();
     assert_eq!(prev, EMPTY_WORD);
     assert_eq!(smt.get_value(&key), val);
 }
@@ -75,7 +75,7 @@ fn rocksdb_persistence_after_insertion() {
     let mut smt = LargeSmt::<RocksDbStorage>::with_entries(initial_storage, entries).unwrap();
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let new_value = Word::new([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(2)]);
-    smt.insert(key, new_value);
+    smt.insert(key, new_value).unwrap();
     let root = smt.root().unwrap();
 
     let mut inner_nodes: Vec<InnerNodeInfo> = smt.inner_nodes().unwrap().collect();

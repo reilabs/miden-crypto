@@ -85,7 +85,7 @@ impl SmtStorage for MemoryStorage {
 
     /// Gets the total number of key-value entries currently stored.
     fn entry_count(&self) -> Result<usize, StorageError> {
-        Ok(self.leaves.read()?.iter().map(|(_, leaf)| leaf.num_entries() as usize).sum())
+        Ok(self.leaves.read()?.iter().map(|(_, leaf)| leaf.num_entries()).sum())
     }
 
     /// Inserts a key-value pair into the leaf at the given index.
@@ -109,7 +109,7 @@ impl SmtStorage for MemoryStorage {
         let mut leaves_guard = self.leaves.write()?;
 
         match leaves_guard.get_mut(&index) {
-            Some(leaf) => Ok(leaf.insert(key, value)),
+            Some(leaf) => Ok(leaf.insert(key, value).expect("Failed to insert value")),
             None => {
                 leaves_guard.insert(index, SmtLeaf::Single((key, value)));
                 Ok(None)

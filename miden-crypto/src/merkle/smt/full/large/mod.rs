@@ -6,8 +6,8 @@ use rayon::prelude::*;
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, Leaves,
-    MerkleError, MerklePath, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, SmtProof,
-    SparseMerkleTree, Word,
+    MerkleError, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof,
+    SparseMerklePath, SparseMerkleTree, Word,
     concurrent::{
         MutatedSubtreeLeaves, PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
         build_subtree, fetch_sibling_pair, process_sorted_pairs_to_leaves,
@@ -298,7 +298,11 @@ impl<S: SmtStorage> LargeSmt<S> {
     ///
     /// This also recomputes all hashes between the leaf (associated with the key) and the root,
     /// updating the root itself.
-    pub fn insert(&mut self, key: Word, value: Word) -> Word {
+    ///
+    /// # Errors
+    /// Returns an error if inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
+    /// entries) in the leaf.
+    pub fn insert(&mut self, key: Word, value: Word) -> Result<Word, MerkleError> {
         <Self as SparseMerkleTree<SMT_DEPTH>>::insert(self, key, value)
     }
 
@@ -550,7 +554,7 @@ impl<S: SmtStorage> LargeSmt<S> {
                 match entry {
                     Some(leaf) => {
                         // Leaf exists, handle update
-                        if leaf.insert(key, value).is_none() {
+                        if leaf.insert(key, value).expect("Failed to insert value").is_none() {
                             // Key had no previous value, increment entry count
                             entry_count_delta += 1;
                         }
@@ -624,7 +628,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let mut reverse_pairs = Map::new();
         for (key, value) in new_pairs {
-            if let Some(old_value) = self.insert_value(key, value) {
+            if let Some(old_value) = self.insert_value(key, value)? {
                 reverse_pairs.insert(key, old_value);
             } else {
                 reverse_pairs.insert(key, Self::EMPTY_VALUE);
@@ -774,7 +778,9 @@ impl<S: SmtStorage> LargeSmt<S> {
 
                 if value != old_value {
                     // Update the leaf and track the new key-value pair
-                    leaf = self.construct_prospective_leaf(leaf, &key, &value);
+                    leaf = self
+                        .construct_prospective_leaf(leaf, &key, &value)
+                        .expect("Failed to construct prospective leaf");
                     new_pairs.insert(key, value);
                     leaf_changed = true;
                 }
@@ -942,11 +948,11 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         self.storage.remove_inner_node(index).expect("Failed to remove inner node")
     }
 
-    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Self::Value {
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Result<Self::Value, MerkleError> {
         let old_value = self.get_value(&key);
         // if the old value and new value are the same, there is nothing to update
         if value == old_value {
-            return value;
+            return Ok(value);
         }
 
         let mutations = self
@@ -954,20 +960,20 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
             .expect("Failed to compute mutations in insert");
         self.apply_mutations(mutations).expect("Failed to apply mutations in insert");
 
-        old_value
+        Ok(old_value)
     }
 
-    fn insert_value(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
+    fn insert_value(
+        &mut self,
+        key: Self::Key,
+        value: Self::Value,
+    ) -> Result<Option<Self::Value>, MerkleError> {
         // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
         let index = Self::key_to_leaf_index(&key).value();
         if value != Self::EMPTY_VALUE {
-            self.storage
-                .insert_value(index, key, value)
-                .expect("Storage error during insert_value")
+            Ok(self.storage.insert_value(index, key, value).expect("Failed to insert value"))
         } else {
-            self.storage
-                .remove_value(index, key)
-                .expect("Storage error during remove_value")
+            Ok(self.storage.remove_value(index, key).expect("Failed to remove value"))
         }
     }
 
@@ -1002,19 +1008,19 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         mut existing_leaf: SmtLeaf,
         key: &Word,
         value: &Word,
-    ) -> SmtLeaf {
+    ) -> Result<SmtLeaf, SmtLeafError> {
         debug_assert_eq!(existing_leaf.index(), Self::key_to_leaf_index(key));
 
         match existing_leaf {
-            SmtLeaf::Empty(_) => SmtLeaf::new_single(*key, *value),
+            SmtLeaf::Empty(_) => Ok(SmtLeaf::new_single(*key, *value)),
             _ => {
                 if *value != EMPTY_WORD {
-                    existing_leaf.insert(*key, *value);
+                    existing_leaf.insert(*key, *value)?;
                 } else {
                     existing_leaf.remove(*key);
                 }
 
-                existing_leaf
+                Ok(existing_leaf)
             },
         }
     }
@@ -1063,7 +1069,8 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
             path.push(sibling_hash);
         }
 
-        let merkle_path = MerklePath::new(path);
+        let merkle_path =
+            SparseMerklePath::from_sized_iter(path).expect("failed to convert to SparseMerklePath");
         Self::path_and_leaf_to_opening(merkle_path, leaf)
     }
 
@@ -1072,7 +1079,7 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         LeafIndex::new_max_depth(most_significant_felt.as_int())
     }
 
-    fn path_and_leaf_to_opening(path: MerklePath, leaf: SmtLeaf) -> SmtProof {
+    fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: SmtLeaf) -> SmtProof {
         SmtProof::new_unchecked(path, leaf)
     }
 }

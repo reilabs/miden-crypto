@@ -162,7 +162,7 @@ fn test_compute_mutations() {
     let large_tree = LargeSmt::<_>::with_entries(storage, entries.clone()).unwrap();
 
     let updates = generate_updates(entries, 1000);
-    let control_mutations = control_smt.compute_mutations(updates.clone());
+    let control_mutations = control_smt.compute_mutations(updates.clone()).unwrap();
     let mutations = large_tree.compute_mutations(updates).unwrap();
     assert_eq!(mutations.root(), control_mutations.root());
     assert_eq!(mutations.old_root(), control_mutations.old_root());
@@ -325,8 +325,8 @@ fn test_insert_entry() {
     let new_key = crate::Word::from([100_u32, 100_u32, 100_u32, 100_u32]);
     let new_value = crate::Word::new([100_u32.into(); WORD_SIZE]);
 
-    let old_value = large_smt.insert(new_key, new_value);
-    let control_old_value = control_smt.insert(new_key, new_value);
+    let old_value = large_smt.insert(new_key, new_value).unwrap();
+    let control_old_value = control_smt.insert(new_key, new_value).unwrap();
     assert_eq!(old_value, control_old_value, "Old values mismatch");
     assert_eq!(old_value, EMPTY_WORD, "Expected empty value");
 
@@ -372,8 +372,8 @@ fn test_mutations_revert() {
     let value_2 = crate::Word::new([2_u32.into(); WORD_SIZE]);
     let value_3 = crate::Word::new([3_u32.into(); WORD_SIZE]);
 
-    smt.insert(key_1, value_1);
-    smt.insert(key_2, value_2);
+    smt.insert(key_1, value_1).unwrap();
+    smt.insert(key_2, value_2).unwrap();
 
     let mutations = smt
         .compute_mutations(vec![(key_1, EMPTY_WORD), (key_2, value_1), (key_3, value_3)])

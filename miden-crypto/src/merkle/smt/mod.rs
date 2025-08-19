@@ -9,9 +9,9 @@ use crate::{EMPTY_WORD, Felt, Map, Word, hash::rpo::Rpo256};
 mod full;
 #[cfg(feature = "concurrent")]
 pub use full::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, Subtree};
+pub use full::{MAX_LEAF_ENTRIES, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
 #[cfg(feature = "rocksdb")]
 pub use full::{RocksDbConfig, RocksDbStorage};
-pub use full::{MAX_LEAF_ENTRIES, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
 #[cfg(feature = "internal")]
 pub use full::{SubtreeLeaf, build_subtree_for_bench};
 

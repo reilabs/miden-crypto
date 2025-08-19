@@ -360,7 +360,7 @@ impl SmtStorage for RocksDbStorage {
 
         let value_to_return: Option<Word> = match maybe_leaf {
             Some(mut existing_leaf) => {
-                let old_value = existing_leaf.insert(key, value);
+                let old_value = existing_leaf.insert(key, value).expect("Failed to insert value");
                 // Determine if the overall SMT entry_count needs to change.
                 // entry_count increases if:
                 //   1. The key was not present in this leaf before (`old_value` is `None`).
