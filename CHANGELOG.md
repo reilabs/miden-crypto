@@ -1,3 +1,7 @@
+## 0.16.1 (TBD)
+
+- Added `{Smt,PartialSmt}::inner_node_indices` to make inner nodes accessible ([#494](https://github.com/0xMiden/crypto/pull/494)).
+
 ## 0.16.0 (2025-08-15)
 
 - [BREAKING] Incremented MSRV to 1.88.
