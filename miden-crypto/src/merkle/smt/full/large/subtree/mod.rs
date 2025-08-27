@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
 use super::{EmptySubtreeRoots, InnerNode, InnerNodeInfo, NodeIndex, SMT_DEPTH, SUBTREE_DEPTH};
-use crate::{Word, merkle::smt::Map, utils::DeserializationError};
+use crate::{Word, merkle::smt::Map};
+
+mod error;
+pub use error::SubtreeError;
 
 #[cfg(test)]
 mod tests;
@@ -89,14 +92,20 @@ impl Subtree {
         (bitmask[bit_offset / 8] >> (bit_offset % 8)) & 1 != 0
     }
 
-    pub fn from_vec(root_index: NodeIndex, data: &[u8]) -> Result<Self, DeserializationError> {
+    pub fn from_vec(root_index: NodeIndex, data: &[u8]) -> Result<Self, SubtreeError> {
         if data.len() < Self::BITMASK_SIZE {
-            return Err(DeserializationError::InvalidValue("Subtree data too short".into()));
+            return Err(SubtreeError::TooShort {
+                found: data.len(),
+                min: Self::BITMASK_SIZE,
+            });
         }
         let (bitmask, hash_data) = data.split_at(Self::BITMASK_SIZE);
         let present_hashes: usize = bitmask.iter().map(|&byte| byte.count_ones() as usize).sum();
         if hash_data.len() != present_hashes * Self::HASH_SIZE {
-            return Err(DeserializationError::InvalidValue("Invalid hash data length".into()));
+            return Err(SubtreeError::BadHashLen {
+                expected: present_hashes * Self::HASH_SIZE,
+                found: hash_data.len(),
+            });
         }
 
         let mut nodes = Map::new();
@@ -116,24 +125,22 @@ impl Subtree {
 
                 // Get left child hash
                 let left_hash = if has_left {
-                    let hash_bytes = hash_chunks.next().ok_or_else(|| {
-                        DeserializationError::InvalidValue("Missing left hash data".into())
-                    })?;
-                    Word::try_from(hash_bytes).map_err(|_| {
-                        DeserializationError::InvalidValue("Invalid left hash format".into())
-                    })?
+                    let hash_bytes = hash_chunks
+                        .next()
+                        .ok_or(SubtreeError::MissingLeft { index: local_index })?;
+                    Word::try_from(hash_bytes)
+                        .map_err(|_| SubtreeError::BadLeft { index: local_index })?
                 } else {
                     empty_hash
                 };
 
                 // Get right child hash
                 let right_hash = if has_right {
-                    let hash_bytes = hash_chunks.next().ok_or_else(|| {
-                        DeserializationError::InvalidValue("Missing right hash data".into())
-                    })?;
-                    Word::try_from(hash_bytes).map_err(|_| {
-                        DeserializationError::InvalidValue("Invalid right hash format".into())
-                    })?
+                    let hash_bytes = hash_chunks
+                        .next()
+                        .ok_or(SubtreeError::MissingRight { index: local_index })?;
+                    Word::try_from(hash_bytes)
+                        .map_err(|_| SubtreeError::BadRight { index: local_index })?
                 } else {
                     empty_hash
                 };
@@ -145,9 +152,7 @@ impl Subtree {
 
         // Ensure all hash data was consumed
         if hash_chunks.next().is_some() {
-            return Err(DeserializationError::InvalidValue(
-                "Hash data is longer than indicated by bitmask".into(),
-            ));
+            return Err(SubtreeError::ExtraData);
         }
 
         Ok(Self { root_index, nodes })

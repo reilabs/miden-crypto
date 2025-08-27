@@ -9,10 +9,10 @@ use super::{MerkleError, StorageError};
 #[derive(Debug, Error)]
 pub enum LargeSmtError {
     /// A Merkle tree operation failed.
-    #[error("merkle operation failed: {0}")]
+    #[error("merkle operation failed")]
     Merkle(#[from] MerkleError),
 
     /// A storage operation failed.
-    #[error("storage operation failed: {0}")]
+    #[error("storage operation failed")]
     Storage(#[from] StorageError),
 }

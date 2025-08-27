@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use std::sync::{PoisonError, RwLock};
 
-use super::{SmtStorage, StorageError, StorageUpdates};
+use super::{SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
@@ -329,8 +329,13 @@ impl SmtStorage for MemoryStorage {
         let mut leaves_guard = self.leaves.write()?;
         let mut subtrees_guard = self.subtrees.write()?;
 
-        let (leaf_updates, subtree_updates, new_root, _leaf_count_delta, _entry_count_delta) =
-            updates.into_parts();
+        let StorageUpdateParts {
+            leaf_updates,
+            subtree_updates,
+            new_root,
+            leaf_count_delta: _,
+            entry_count_delta: _,
+        } = updates.into_parts();
 
         for (index, leaf_opt) in leaf_updates {
             if let Some(leaf) = leaf_opt {

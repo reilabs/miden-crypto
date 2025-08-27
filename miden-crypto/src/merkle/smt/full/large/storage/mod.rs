@@ -24,7 +24,7 @@ mod memory;
 pub use memory::MemoryStorage;
 
 mod updates;
-pub use updates::StorageUpdates;
+pub use updates::{StorageUpdateParts, StorageUpdates};
 
 /// Sparse Merkle Tree storage backend.
 ///
@@ -221,19 +221,19 @@ where
 {
     #[inline]
     fn get_root(&self) -> Result<Option<Word>, StorageError> {
-        (**self).get_root()
+        self.deref().get_root()
     }
     #[inline]
     fn set_root(&self, root: Word) -> Result<(), StorageError> {
-        (**self).set_root(root)
+        self.deref().set_root(root)
     }
     #[inline]
     fn leaf_count(&self) -> Result<usize, StorageError> {
-        (**self).leaf_count()
+        self.deref().leaf_count()
     }
     #[inline]
     fn entry_count(&self) -> Result<usize, StorageError> {
-        (**self).entry_count()
+        self.deref().entry_count()
     }
 
     #[inline]
@@ -243,61 +243,61 @@ where
         key: Word,
         value: Word,
     ) -> Result<Option<Word>, StorageError> {
-        (**self).insert_value(index, key, value)
+        self.deref().insert_value(index, key, value)
     }
 
     #[inline]
     fn remove_value(&self, index: u64, key: Word) -> Result<Option<Word>, StorageError> {
-        (**self).remove_value(index, key)
+        self.deref().remove_value(index, key)
     }
 
     #[inline]
     fn get_leaf(&self, index: u64) -> Result<Option<SmtLeaf>, StorageError> {
-        (**self).get_leaf(index)
+        self.deref().get_leaf(index)
     }
     #[inline]
     fn set_leaves(&self, leaves: Map<u64, SmtLeaf>) -> Result<(), StorageError> {
-        (**self).set_leaves(leaves)
+        self.deref().set_leaves(leaves)
     }
     #[inline]
     fn remove_leaf(&self, index: u64) -> Result<Option<SmtLeaf>, StorageError> {
-        (**self).remove_leaf(index)
+        self.deref().remove_leaf(index)
     }
     #[inline]
     fn get_leaves(&self, indices: &[u64]) -> Result<Vec<Option<SmtLeaf>>, StorageError> {
-        (**self).get_leaves(indices)
+        self.deref().get_leaves(indices)
     }
     #[inline]
     fn has_leaves(&self) -> Result<bool, StorageError> {
-        (**self).has_leaves()
+        self.deref().has_leaves()
     }
 
     #[inline]
     fn get_subtree(&self, index: NodeIndex) -> Result<Option<Subtree>, StorageError> {
-        (**self).get_subtree(index)
+        self.deref().get_subtree(index)
     }
 
     #[inline]
     fn get_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<Subtree>>, StorageError> {
-        (**self).get_subtrees(indices)
+        self.deref().get_subtrees(indices)
     }
 
     #[inline]
     fn set_subtree(&self, subtree: &Subtree) -> Result<(), StorageError> {
-        (**self).set_subtree(subtree)
+        self.deref().set_subtree(subtree)
     }
     #[inline]
     fn set_subtrees(&self, subtrees: Vec<Subtree>) -> Result<(), StorageError> {
-        (**self).set_subtrees(subtrees)
+        self.deref().set_subtrees(subtrees)
     }
     #[inline]
     fn remove_subtree(&self, index: NodeIndex) -> Result<(), StorageError> {
-        (**self).remove_subtree(index)
+        self.deref().remove_subtree(index)
     }
 
     #[inline]
     fn get_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
-        (**self).get_inner_node(index)
+        self.deref().get_inner_node(index)
     }
 
     #[inline]
@@ -306,31 +306,31 @@ where
         index: NodeIndex,
         node: InnerNode,
     ) -> Result<Option<InnerNode>, StorageError> {
-        (**self).set_inner_node(index, node)
+        self.deref().set_inner_node(index, node)
     }
 
     #[inline]
     fn remove_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
-        (**self).remove_inner_node(index)
+        self.deref().remove_inner_node(index)
     }
 
     #[inline]
     fn apply(&self, updates: StorageUpdates) -> Result<(), StorageError> {
-        (**self).apply(updates)
+        self.deref().apply(updates)
     }
 
     #[inline]
     fn iter_leaves(&self) -> Result<Box<dyn Iterator<Item = (u64, SmtLeaf)> + '_>, StorageError> {
-        (**self).iter_leaves()
+        self.deref().iter_leaves()
     }
 
     #[inline]
     fn iter_subtrees(&self) -> Result<Box<dyn Iterator<Item = Subtree> + '_>, StorageError> {
-        (**self).iter_subtrees()
+        self.deref().iter_subtrees()
     }
 
     #[inline]
     fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
-        (**self).get_depth24()
+        self.deref().get_depth24()
     }
 }

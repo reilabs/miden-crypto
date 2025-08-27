@@ -22,10 +22,10 @@ pub use error::LargeSmtError;
 mod tests;
 
 mod subtree;
-pub use subtree::Subtree;
+pub use subtree::{Subtree, SubtreeError};
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdates};
+pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 
@@ -374,22 +374,32 @@ impl<S: SmtStorage> LargeSmt<S> {
         let mut node_mutations = NodeMutations::default();
 
         // Process each depth level in reverse, stepping by the subtree depth
-        for depth in (SUBTREE_DEPTH..=SMT_DEPTH).step_by(SUBTREE_DEPTH as usize).rev() {
+        for subtree_root_depth in
+            (0..=SMT_DEPTH - SUBTREE_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
+        {
             // Parallel processing of each subtree to generate mutations and roots
             let (mutations_per_subtree, mut subtree_roots): (Vec<_>, Vec<_>) = leaves
                 .into_par_iter()
                 .map(|subtree_leaves| {
-                    let subtree: Option<Subtree> = if depth < IN_MEMORY_DEPTH + SUBTREE_DEPTH {
+                    let subtree: Option<Subtree> = if subtree_root_depth < IN_MEMORY_DEPTH {
                         None
                     } else {
-                        let index = NodeIndex::new_unchecked(depth, subtree_leaves[0].col);
-                        let subtree_root_index = Subtree::find_subtree_root(index.parent());
+                        // Compute subtree root index
+                        let subtree_root_index = NodeIndex::new_unchecked(
+                            subtree_root_depth,
+                            subtree_leaves[0].col >> SUBTREE_DEPTH,
+                        );
                         self.storage
                             .get_subtree(subtree_root_index)
                             .expect("Storage error getting subtree in compute_mutations")
                     };
                     debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
-                    self.build_subtree_mutations(subtree_leaves, SMT_DEPTH, depth, subtree)
+                    self.build_subtree_mutations(
+                        subtree_leaves,
+                        SMT_DEPTH,
+                        subtree_root_depth,
+                        subtree,
+                    )
                 })
                 .unzip();
 
@@ -808,17 +818,18 @@ impl<S: SmtStorage> LargeSmt<S> {
         &self,
         mut leaves: Vec<SubtreeLeaf>,
         tree_depth: u8,
-        bottom_depth: u8,
+        subtree_root_depth: u8,
         subtree: Option<Subtree>,
     ) -> (NodeMutations, SubtreeLeaf)
     where
         Self: Sized,
     {
+        let bottom_depth = subtree_root_depth + SUBTREE_DEPTH;
+
         debug_assert!(bottom_depth <= tree_depth);
         debug_assert!(Integer::is_multiple_of(&bottom_depth, &SUBTREE_DEPTH));
         debug_assert!(leaves.len() <= usize::pow(2, SUBTREE_DEPTH as u32));
 
-        let subtree_root_depth = bottom_depth - SUBTREE_DEPTH;
         let mut node_mutations: NodeMutations = Default::default();
         let mut next_leaves: Vec<SubtreeLeaf> = Vec::with_capacity(leaves.len() / 2);
 
@@ -971,7 +982,15 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
         let index = Self::key_to_leaf_index(&key).value();
         if value != Self::EMPTY_VALUE {
-            Ok(self.storage.insert_value(index, key, value).expect("Failed to insert value"))
+            match self.storage.insert_value(index, key, value) {
+                Ok(prev) => Ok(prev),
+                Err(StorageError::Leaf(SmtLeafError::TooManyLeafEntries { actual })) => {
+                    Err(MerkleError::TooManyLeafEntries { actual })
+                },
+                Err(_) => {
+                    panic!("Storage error during insert_value");
+                },
+            }
         } else {
             Ok(self.storage.remove_value(index, key).expect("Failed to remove value"))
         }
@@ -982,8 +1001,8 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         match self.storage.get_leaf(leaf_pos.value()) {
             Ok(Some(leaf)) => leaf.get_value(key).unwrap_or_default(),
             Ok(None) => EMPTY_WORD,
-            Err(e) => {
-                panic!("Storage error during get_leaf in get_value: {:?}", e);
+            Err(_) => {
+                panic!("Storage error during get_leaf in get_value");
             },
         }
     }
@@ -993,8 +1012,8 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
         match self.storage.get_leaf(leaf_pos) {
             Ok(Some(leaf)) => leaf,
             Ok(None) => SmtLeaf::new_empty((*key).into()),
-            Err(e) => {
-                panic!("Storage error during get_leaf in get_leaf: {:?}", e);
+            Err(_) => {
+                panic!("Storage error during get_leaf in get_leaf");
             },
         }
     }

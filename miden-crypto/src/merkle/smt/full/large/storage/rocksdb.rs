@@ -6,9 +6,9 @@ use rocksdb::{
     DBIteratorWithThreadMode, FlushOptions, IteratorMode, Options, ReadOptions, WriteBatch,
     WriteOptions,
 };
-use winter_utils::{Deserializable, DeserializationError, Serializable};
+use winter_utils::{Deserializable, Serializable};
 
-use super::{SmtStorage, StorageError, StorageUpdates};
+use super::{SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
@@ -288,20 +288,17 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::Backend`: If the metadata column family is missing or a RocksDB error
     ///   occurs.
-    /// - `StorageError::DeserializationError`: If the retrieved count bytes are invalid.
+    /// - `StorageError::BadValueLen`: If the retrieved count bytes are invalid.
     fn leaf_count(&self) -> Result<usize, StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
-        self.db.get_cf(cf, LEAF_COUNT_KEY)?.map_or(Ok(0), |bytes_vec| {
-            let actual_len = bytes_vec.len();
-            bytes_vec
-                .try_into()
-                .map_err(|_e| {
-                    DeserializationError::InvalidValue(format!(
-                        "Invalid byte length for leaf count: expected 8, got {actual_len}"
-                    ))
-                    .into()
-                })
-                .map(usize::from_be_bytes)
+        self.db.get_cf(cf, LEAF_COUNT_KEY)?.map_or(Ok(0), |bytes| {
+            let arr: [u8; 8] =
+                bytes.as_slice().try_into().map_err(|_| StorageError::BadValueLen {
+                    what: "leaf count",
+                    expected: 8,
+                    found: bytes.len(),
+                })?;
+            Ok(usize::from_be_bytes(arr))
         })
     }
 
@@ -311,20 +308,17 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::Backend`: If the metadata column family is missing or a RocksDB error
     ///   occurs.
-    /// - `StorageError::DeserializationError`: If the retrieved count bytes are invalid.
+    /// - `StorageError::BadValueLen`: If the retrieved count bytes are invalid.
     fn entry_count(&self) -> Result<usize, StorageError> {
         let cf = self.cf_handle(METADATA_CF)?;
-        self.db.get_cf(cf, ENTRY_COUNT_KEY)?.map_or(Ok(0), |bytes_vec| {
-            let actual_len = bytes_vec.len();
-            bytes_vec
-                .try_into()
-                .map_err(|_e| {
-                    DeserializationError::InvalidValue(format!(
-                        "Invalid byte length for entry count: expected 8, got {actual_len}"
-                    ))
-                    .into()
-                })
-                .map(usize::from_be_bytes)
+        self.db.get_cf(cf, ENTRY_COUNT_KEY)?.map_or(Ok(0), |bytes| {
+            let arr: [u8; 8] =
+                bytes.as_slice().try_into().map_err(|_| StorageError::BadValueLen {
+                    what: "entry count",
+                    expected: 8,
+                    found: bytes.len(),
+                })?;
+            Ok(usize::from_be_bytes(arr))
         })
     }
 
@@ -746,7 +740,7 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// # Errors
     /// - `StorageError::Backend`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors occur.
-    /// - `StorageError::DeserializationError`: If the containing Subtree data is corrupt.
+    /// - `StorageError::Value`: If the containing Subtree data is corrupt.
     fn get_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
         if index.depth() < IN_MEMORY_DEPTH {
             return Err(StorageError::Unsupported(
@@ -767,7 +761,7 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// # Errors
     /// - `StorageError::Backend`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors occur.
-    /// - `StorageError::DeserializationError`: If existing Subtree data is corrupt.
+    /// - `StorageError::Value`: If existing Subtree data is corrupt.
     fn set_inner_node(
         &self,
         index: NodeIndex,
@@ -796,7 +790,7 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// # Errors
     /// - `StorageError::Backend`: If `index.depth() < IN_MEMORY_DEPTH`, or if RocksDB errors occur.
-    /// - `StorageError::DeserializationError`: If existing Subtree data is corrupt.
+    /// - `StorageError::Value`: If existing Subtree data is corrupt.
     fn remove_inner_node(&self, index: NodeIndex) -> Result<Option<InnerNode>, StorageError> {
         if index.depth() < IN_MEMORY_DEPTH {
             return Err(StorageError::Unsupported(
@@ -844,8 +838,13 @@ impl SmtStorage for RocksDbStorage {
         let metadata_cf = self.cf_handle(METADATA_CF)?;
         let depth24_cf = self.cf_handle(DEPTH_24_CF)?;
 
-        let (leaf_updates, subtree_updates, new_root, leaf_count_delta, entry_count_delta) =
-            updates.into_parts();
+        let StorageUpdateParts {
+            leaf_updates,
+            subtree_updates,
+            new_root,
+            leaf_count_delta,
+            entry_count_delta,
+        } = updates.into_parts();
 
         // Process leaf updates
         for (index, maybe_leaf) in leaf_updates {
@@ -973,7 +972,7 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::Backend`: If the depth24 column family is missing or a RocksDB error
     ///   occurs.
-    /// - `StorageError::DeserializationError`: If any hash bytes are corrupt.
+    /// - `StorageError::Value`: If any hash bytes are corrupt.
     fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
         let cf = self.cf_handle(DEPTH_24_CF)?;
         let iter = self.db.iterator_cf(cf, IteratorMode::Start);
@@ -1244,20 +1243,13 @@ impl AsRef<[u8]> for KeyBytes {
 /// Expects `key_bytes` to be exactly 8 bytes long.
 ///
 /// # Errors
-/// - `StorageError::DeserializationError`: If `key_bytes` is not 8 bytes long or conversion fails.
+/// - `StorageError::BadKeyLen`: If `key_bytes` is not 8 bytes long or conversion fails.
 fn index_from_key_bytes(key_bytes: &[u8]) -> Result<u64, StorageError> {
     if key_bytes.len() != 8 {
-        return Err(DeserializationError::InvalidValue(format!(
-            "invalid key length {key_bytes:?} for leaf index"
-        ))
-        .into());
+        return Err(StorageError::BadKeyLen { expected: 8, found: key_bytes.len() });
     }
-    let arr: [u8; 8] = key_bytes.try_into().map_err(|_| {
-        DeserializationError::InvalidValue(format!(
-            "invalid key length {key_bytes:?} for leaf index"
-        ))
-    })?;
-
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(key_bytes);
     Ok(u64::from_be_bytes(arr))
 }
 
@@ -1274,6 +1266,7 @@ fn index_from_key_bytes(key_bytes: &[u8]) -> Result<u64, StorageError> {
 /// * `StorageError::Unsupported` -  `depth` is not one of 24/32/40/48/56.
 /// * `StorageError::DeserializationError` - `key_bytes.len()` does not match the length required by
 ///   `depth`.
+#[inline(always)]
 fn subtree_root_from_key_bytes(key_bytes: &[u8], depth: u8) -> Result<NodeIndex, StorageError> {
     let expected = match depth {
         24 => 3,
@@ -1281,15 +1274,11 @@ fn subtree_root_from_key_bytes(key_bytes: &[u8], depth: u8) -> Result<NodeIndex,
         40 => 5,
         48 => 6,
         56 => 7,
-        d => {
-            return Err(StorageError::Unsupported(format!("unsupported subtree depth {d}")));
-        },
+        d => return Err(StorageError::Unsupported(format!("unsupported subtree depth {d}"))),
     };
+
     if key_bytes.len() != expected {
-        let length = key_bytes.len();
-        return Err(DeserializationError::InvalidValue(format!(
-            "Invalid key length {key_bytes:?} for subtree root: expected {expected}, actual {length}",
-        )).into());
+        return Err(StorageError::BadSubtreeKeyLen { depth, expected, found: key_bytes.len() });
     }
     let mut buf = [0u8; 8];
     buf[8 - expected..].copy_from_slice(key_bytes);

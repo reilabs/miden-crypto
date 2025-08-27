@@ -6,8 +6,37 @@ use crate::{
     },
 };
 
-type UpdatesTuple =
-    (Map<u64, Option<SmtLeaf>>, Map<NodeIndex, Option<Subtree>>, Word, isize, isize);
+/// Owned decomposition of a [`StorageUpdates`] batch into its constituent parts.
+///
+/// This struct provides direct access to the individual components of a storage update
+/// batch after transferring ownership from [`StorageUpdates::into_parts`].
+#[derive(Debug)]
+pub struct StorageUpdateParts {
+    /// Leaf updates indexed by their position in the tree.
+    ///
+    /// `Some(leaf)` indicates an insertion or update, while `None` indicates deletion.
+    pub leaf_updates: Map<u64, Option<SmtLeaf>>,
+
+    /// Subtree updates indexed by their root node position.
+    ///
+    /// `Some(subtree)` indicates an insertion or update, while `None` indicates deletion.
+    pub subtree_updates: Map<NodeIndex, Option<Subtree>>,
+
+    /// Root hash of the tree after applying all updates.
+    pub new_root: Word,
+
+    /// Net change in the count of non-empty leaves.
+    ///
+    /// Positive values indicate more leaves were added than removed,
+    /// negative values indicate more leaves were removed than added.
+    pub leaf_count_delta: isize,
+
+    /// Net change in the total number of key-value entries across all leaves.
+    ///
+    /// Positive values indicate more entries were added than removed,
+    /// negative values indicate more entries were removed than added.
+    pub entry_count_delta: isize,
+}
 
 /// Represents a collection of changes to be applied atomically to an SMT storage backend.
 ///
@@ -164,20 +193,14 @@ impl StorageUpdates {
         self.subtree_updates
     }
 
-    /// Consumes this StorageUpdates and returns all components.
-    ///
-    /// First component is the leaf updates map.
-    /// Second component is the subtree updates map.
-    /// Third component is the new root hash.
-    /// Fourth component is the leaf count delta.
-    /// Fifth component is the entry count delta.
-    pub fn into_parts(self) -> UpdatesTuple {
-        (
-            self.leaf_updates,
-            self.subtree_updates,
-            self.new_root,
-            self.leaf_count_delta,
-            self.entry_count_delta,
-        )
+    /// Consumes this `StorageUpdates` and returns its owned parts as a [`StorageUpdateParts`].
+    pub fn into_parts(self) -> StorageUpdateParts {
+        StorageUpdateParts {
+            leaf_updates: self.leaf_updates,
+            subtree_updates: self.subtree_updates,
+            new_root: self.new_root,
+            leaf_count_delta: self.leaf_count_delta,
+            entry_count_delta: self.entry_count_delta,
+        }
     }
 }
