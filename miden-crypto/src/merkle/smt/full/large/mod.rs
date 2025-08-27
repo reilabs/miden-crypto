@@ -300,8 +300,8 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// updating the root itself.
     ///
     /// # Errors
-    /// Returns an error if inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
-    /// entries) in the leaf.
+    /// Returns an error if inserting the key-value pair would exceed
+    /// [`MAX_LEAF_ENTRIES`](super::MAX_LEAF_ENTRIES) (1024 entries) in the leaf.
     pub fn insert(&mut self, key: Word, value: Word) -> Result<Word, MerkleError> {
         <Self as SparseMerkleTree<SMT_DEPTH>>::insert(self, key, value)
     }
@@ -321,7 +321,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// # use miden_crypto::merkle::{Smt, EmptySubtreeRoots, SMT_DEPTH};
     /// let mut smt = Smt::new();
     /// let pair = (Word::default(), Word::default());
-    /// let mutations = smt.compute_mutations(vec![pair]);
+    /// let mutations = smt.compute_mutations(vec![pair]).expect("compute_mutations ok");
     /// assert_eq!(mutations.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
     /// smt.apply_mutations(mutations);
     /// assert_eq!(smt.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));

@@ -44,7 +44,7 @@ doc: ## Generate and check documentation
 
 .PHONY: test-default
 test-default: ## Run tests with default features
-	$(DEBUG_OVERFLOW_INFO) cargo nextest run --profile default --release --all-features
+	$(DEBUG_OVERFLOW_INFO) cargo nextest run --profile default --release
 
 .PHONY: test-hashmaps
 test-hashmaps: ## Run tests with `hashmaps` feature enabled
@@ -56,7 +56,7 @@ test-no-std: ## Run tests with `no-default-features` (std)
 
 .PHONY: test-smt-concurrent
 test-smt-concurrent: ## Run only concurrent SMT tests
-	$(DEBUG_OVERFLOW_INFO) cargo nextest run --profile smt-concurrent --release --all-features
+	$(DEBUG_OVERFLOW_INFO) cargo nextest run --profile smt-concurrent --release
 
 .PHONY: test-docs
 test-docs:
@@ -64,10 +64,10 @@ test-docs:
 
 .PHONY: test-large-smt
 test-large-smt: ## Run only large SMT tests
-	$(DEBUG_OVERFLOW_INFO) cargo nextest run --success-output immediate  --profile large-smt --release --all-features
+	$(DEBUG_OVERFLOW_INFO) cargo nextest run --success-output immediate  --profile large-smt --release --features hashmaps,rocksdb
 
 .PHONY: test
-test: test-default test-smt-hashmaps test-no-std test-docs test-large-smt ## Run all tests except concurrent SMT tests
+test: test-default test-hashmaps test-no-std test-docs test-large-smt ## Run all tests except concurrent SMT tests
 
 # --- checking ------------------------------------------------------------------------------------
 
