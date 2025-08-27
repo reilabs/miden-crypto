@@ -1,7 +1,11 @@
 ## 0.17.0 (TBD)
 
-- Fix broken imports in CPU-specific `rescue` implementations (AVX2, SVE) ([#492](https://github.com/0xMiden/crypto/pull/492/)).
 - Added `LargeSmt`, SMT backed by RocksDB ([#438](https://github.com/0xMiden/miden-crypto/pull/438)).
+
+## 0.16.1 (2025-08-21)
+
+- Fix broken imports in CPU-specific `rescue` implementations (AVX2, SVE) ([#492](https://github.com/0xMiden/crypto/pull/492/)).
+- Added `{Smt,PartialSmt}::inner_node_indices` to make inner nodes accessible ([#494](https://github.com/0xMiden/crypto/pull/494)).
 
 ## 0.16.0 (2025-08-15)
 
