@@ -1,6 +1,6 @@
 [package]
 name = "miden-crypto"
-version = "0.17.0"
+version = "0.17.0-test"
 description = "Miden Cryptographic primitives"
 authors.workspace = true
 readme = "../README.md"
