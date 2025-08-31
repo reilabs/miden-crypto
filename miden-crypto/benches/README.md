@@ -1,6 +1,6 @@
 # Benchmarks
 
-## Part 1: Benchmark Results
+## Benchmark Results
 
 ### Hash Functions
 
@@ -81,9 +81,7 @@ We build cryptographic data structures incorporating these hash functions. What 
 Notes:
 - On AMD Ryzen 9 7950X, benchmarks are run with AVX2 acceleration enabled.
 
----
-
-## Part 2: Benchmark Explanations
+## Benchmark Explanations
 
 ### Instructions
 
