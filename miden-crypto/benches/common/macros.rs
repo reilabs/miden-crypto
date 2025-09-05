@@ -964,18 +964,18 @@ macro_rules! benchmark_word_conversions {
 /// # Arguments
 /// * `$aead_module` - The AEAD module name (e.g., aead_rpo)
 /// * `$group_prefix` - Human-readable prefix for benchmark group names
-/// * `$bytes_fn` - The name of the benchmark function to generate
+/// * `$bytes_fn` - The name of the benchmark function to generate for bytes
 /// * `$group_ident` - The identifier for the criterion group
 ///
 /// # Generated benchmarks
 /// - `$bytes_fn` - Function containing byte array encryption/decryption benchmarks
 /// - `$group_ident` - Criterion group for the benchmarks
 #[macro_export]
-macro_rules! benchmark_aead {
+macro_rules! benchmark_aead_bytes {
     ($aead_module:ident, $group_prefix:expr, $bytes_fn:ident, $group_ident:ident) => {
         /// Benchmark AEAD operations on byte arrays
         fn $bytes_fn(c: &mut Criterion) {
-            use miden_crypto::encryption::$aead_module::{Nonce, SecretKey};
+            use miden_crypto::aead::$aead_module::{Nonce, SecretKey};
             use rand_chacha::ChaCha20Rng;
             use rand_core::SeedableRng;
 
@@ -996,7 +996,7 @@ macro_rules! benchmark_aead {
                         || Nonce::with_rng(&mut rng),
                         |nonce| {
                             black_box(
-                                key.encrypt_with_nonce(
+                                key.encrypt_bytes_with_nonce(
                                     black_box(data),
                                     black_box(&associated_data),
                                     black_box(nonce),
@@ -1011,7 +1011,7 @@ macro_rules! benchmark_aead {
                 // Pre-encrypt data for decryption benchmark
                 let nonce = Nonce::with_rng(&mut rng);
                 let encrypted =
-                    key.encrypt_with_nonce(&data, &associated_data, nonce.clone()).unwrap();
+                    key.encrypt_bytes_with_nonce(&data, &associated_data, nonce.clone()).unwrap();
 
                 // Decryption benchmark
                 group.bench_with_input(
@@ -1020,7 +1020,7 @@ macro_rules! benchmark_aead {
                     |b, encrypted| {
                         b.iter(|| {
                             black_box(
-                                key.decrypt_with_associated_data(
+                                key.decrypt_bytes_with_associated_data(
                                     black_box(encrypted),
                                     &associated_data,
                                 )
@@ -1035,5 +1035,90 @@ macro_rules! benchmark_aead {
         }
 
         criterion_group!($group_ident, $bytes_fn);
+    };
+}
+
+/// Generates comprehensive AEAD benchmarks for field elements.
+///
+/// This macro creates benchmarks for encryption and decryption operations
+/// using the new standardized approach with consistent data generation,
+/// throughput measurement, and reduced boilerplate.
+///
+/// # Arguments
+/// * `$aead_module` - The AEAD module name (e.g., aead_rpo)
+/// * `$group_prefix` - Human-readable prefix for benchmark group names
+/// * `$felts_fn` - The name of the benchmark function to generate for Felts
+/// * `$group_ident` - The identifier for the criterion group
+///
+/// # Generated benchmarks
+/// - `$felts_fn` - Function containing Felt array encryption/decryption benchmarks
+/// - `$group_ident` - Criterion group for the benchmarks
+#[macro_export]
+macro_rules! benchmark_aead_field {
+    ($aead_module:ident, $group_prefix:expr, $felts_fn:ident, $group_ident:ident) => {
+        /// Benchmark AEAD operations on field elements
+        fn $felts_fn(c: &mut Criterion) {
+            use miden_crypto::aead::$aead_module::{Nonce, SecretKey};
+            use rand_chacha::ChaCha20Rng;
+            use rand_core::SeedableRng;
+
+            let group_name = format!("{} - Field Elements", $group_prefix);
+            let mut group = c.benchmark_group(&group_name);
+            let mut rng = ChaCha20Rng::seed_from_u64(42);
+
+            // Setup common test data
+            let key = SecretKey::with_rng(&mut rng);
+            let associated_data: Vec<Felt> = generate_felt_array_sequential(8);
+
+            for &size in FELT_SIZES {
+                let data: Vec<Felt> = generate_felt_array_random(size);
+                group.throughput(Throughput::Elements(size as u64));
+
+                // Encryption benchmark
+                group.bench_with_input(BenchmarkId::new("encrypt", size), &data, |b, data| {
+                    b.iter_batched(
+                        || Nonce::with_rng(&mut rng),
+                        |nonce| {
+                            black_box(
+                                key.encrypt_elements_with_nonce(
+                                    black_box(data),
+                                    black_box(&associated_data),
+                                    black_box(nonce),
+                                )
+                                .unwrap(),
+                            );
+                        },
+                        criterion::BatchSize::SmallInput,
+                    );
+                });
+
+                // Pre-encrypt data for decryption benchmark
+                let nonce = Nonce::with_rng(&mut rng);
+                let encrypted = key
+                    .encrypt_elements_with_nonce(&data, &associated_data, nonce.clone())
+                    .unwrap();
+
+                // Decryption benchmark
+                group.bench_with_input(
+                    BenchmarkId::new("decrypt", size),
+                    &encrypted,
+                    |b, encrypted| {
+                        b.iter(|| {
+                            black_box(
+                                key.decrypt_elements_with_associated_data(
+                                    black_box(encrypted),
+                                    &associated_data,
+                                )
+                                .unwrap(),
+                            )
+                        });
+                    },
+                );
+            }
+
+            group.finish();
+        }
+
+        criterion_group!($group_ident, $felts_fn);
     };
 }

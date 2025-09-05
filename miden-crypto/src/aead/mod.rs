@@ -2,6 +2,7 @@
 
 use core::fmt;
 
+pub mod aead_rpo;
 pub mod xchacha;
 
 // ERROR TYPES
@@ -14,6 +15,7 @@ pub enum EncryptionError {
     InvalidAuthTag,
     /// Operation failed
     FailedOperation,
+    /// Padding is malformed
     MalformedPadding,
 }
 
