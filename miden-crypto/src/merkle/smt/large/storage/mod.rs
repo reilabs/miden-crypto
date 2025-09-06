@@ -5,10 +5,7 @@ use crate::{
     Word,
     merkle::{
         NodeIndex, SmtLeaf,
-        smt::{
-            Map,
-            full::{InnerNode, large::subtree::Subtree},
-        },
+        smt::{InnerNode, Map, large::subtree::Subtree},
     },
 };
 
@@ -69,6 +66,9 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     ///
     /// Implementations are responsible for updating overall leaf and entry counts if necessary.
     ///
+    /// Note: This only updates the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
+    ///
     /// # Errors
     /// Returns `StorageError` if the storage operation fails (e.g., backend database error,
     /// insufficient space, serialization failures).
@@ -91,6 +91,9 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     ///
     /// Implementations are responsible for updating overall leaf and entry counts if necessary.
     ///
+    /// Note: This only updates the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
+    ///
     /// # Errors
     /// Returns `StorageError` if the storage operation fails (e.g., backend database error,
     /// write permission issues, serialization failures).
@@ -106,11 +109,17 @@ pub trait SmtStorage: 'static + fmt::Debug + Send + Sync {
     /// it should be overwritten with the new `SmtLeaf` data.
     /// If it does not exist, a new leaf is stored.
     ///
+    /// Note: This only updates the leaves. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
+    ///
     /// # Errors
     /// Returns `StorageError` if any storage operation fails during the batch update.
     fn set_leaves(&self, leaves: Map<u64, SmtLeaf>) -> Result<(), StorageError>;
 
     /// Removes a single SMT leaf node entirely from storage by its logical `index`.
+    ///
+    /// Note: This only removes the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
     ///
     /// Returns the `SmtLeaf` that was removed, or `Ok(None)` if no leaf existed at `index`.
     /// Implementations should ensure that removing a leaf also correctly updates

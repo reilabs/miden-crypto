@@ -1,3 +1,117 @@
+//! Large-scale Sparse Merkle Tree backed by pluggable storage.
+//!
+//! `LargeSmt` stores the top of the tree (depths 0–23) in memory and persists the lower
+//! depths (24–64) in storage as fixed-size subtrees. This hybrid layout scales beyond RAM
+//! while keeping common operations fast. With the `rocksdb` feature enabled, the lower
+//! subtrees and leaves are stored in RocksDB. On reopen, the in-memory top is reconstructed
+//! from cached depth-24 subtree roots.
+//!
+//! Examples below require the `rocksdb` feature.
+//!
+//! Open an existing RocksDB-backed tree:
+//! ```no_run
+//! use miden_crypto::merkle::{LargeSmt, RocksDbConfig, RocksDbStorage};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
+//! let smt = LargeSmt::new(storage)?; // reconstructs in-memory top if data exists
+//! let _root = smt.root()?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Initialize an empty RocksDB-backed tree and bulk-load entries using mutations:
+//! ```no_run
+//! use miden_crypto::{
+//!     Felt, Word,
+//!     merkle::{LargeSmt, RocksDbConfig, RocksDbStorage},
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let path = "/path/to/new-db";
+//! if std::path::Path::new(path).exists() {
+//!     std::fs::remove_dir_all(path)?;
+//! }
+//! std::fs::create_dir_all(path)?;
+//!
+//! let storage = RocksDbStorage::open(RocksDbConfig::new(path))?;
+//! let mut smt = LargeSmt::new(storage)?; // empty tree
+//!
+//! // Prepare initial entries
+//! let entries = vec![
+//!     (
+//!         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
+//!         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+//!     ),
+//!     (
+//!         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
+//!         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+//!     ),
+//! ];
+//!
+//! // Compute and atomically apply the initial bulk load
+//! let mutations = smt.compute_mutations(entries)?;
+//! smt.apply_mutations(mutations)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Compute and apply a batch of updates atomically:
+//! ```no_run
+//! use miden_crypto::{
+//!     EMPTY_WORD, Felt, Word,
+//!     merkle::{LargeSmt, RocksDbConfig, RocksDbStorage},
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
+//! let mut smt = LargeSmt::new(storage)?;
+//!
+//! let k1 = Word::new([Felt::new(101), Felt::new(0), Felt::new(0), Felt::new(0)]);
+//! let v1 = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+//! let k2 = Word::new([Felt::new(202), Felt::new(0), Felt::new(0), Felt::new(0)]);
+//! let k3 = Word::new([Felt::new(303), Felt::new(0), Felt::new(0), Felt::new(0)]);
+//! let v3 = Word::new([Felt::new(7), Felt::new(7), Felt::new(7), Felt::new(7)]);
+//!
+//! // EMPTY_WORD marks deletions.
+//! let updates = vec![(k1, v1), (k2, EMPTY_WORD), (k3, v3)];
+//! let mutations = smt.compute_mutations(updates)?;
+//! smt.apply_mutations(mutations)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Quick initialization with `with_entries` (best for modest datasets/tests):
+//! ```no_run
+//! use miden_crypto::{
+//!     Felt, Word,
+//!     merkle::{LargeSmt, RocksDbConfig, RocksDbStorage},
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Note: `with_entries` expects an EMPTY storage and performs an all-at-once build.
+//! // Prefer `compute_mutations` + `apply_mutations` for very large/bulk loads.
+//! let path = "/path/to/new-db";
+//! if std::path::Path::new(path).exists() {
+//!     std::fs::remove_dir_all(path)?;
+//! }
+//! std::fs::create_dir_all(path)?;
+//!
+//! let storage = RocksDbStorage::open(RocksDbConfig::new(path))?;
+//! let entries = vec![
+//!     (
+//!         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
+//!         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+//!     ),
+//!     (
+//!         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
+//!         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+//!     ),
+//! ];
+//! let _smt = LargeSmt::with_entries(storage, entries)?;
+//! # Ok(())
+//! # }
+//! ```
 use alloc::{boxed::Box, vec::Vec};
 use core::mem;
 
@@ -5,15 +119,17 @@ use num::Integer;
 use rayon::prelude::*;
 
 use super::{
-    EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, Leaves,
-    MerkleError, MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof,
+    EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
+    MutationSet, NodeIndex, Rpo256, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof,
     SparseMerklePath, SparseMerkleTree, Word,
-    concurrent::{
+};
+use crate::merkle::smt::{
+    Map, NodeMutation, NodeMutations,
+    full::concurrent::{
         MutatedSubtreeLeaves, PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
         build_subtree, fetch_sibling_pair, process_sorted_pairs_to_leaves,
     },
 };
-use crate::merkle::smt::{Map, NodeMutation, NodeMutations};
 
 mod error;
 pub use error::LargeSmtError;
@@ -56,6 +172,7 @@ const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
 // TYPES
 // ================================================================================================
 
+type Leaves = super::Leaves<SmtLeaf>;
 // LargeSmt
 // ================================================================================================
 
@@ -608,8 +725,6 @@ impl<S: SmtStorage> LargeSmt<S> {
     where
         Self: Sized,
     {
-        self.apply_mutations(mutations.clone())?;
-
         use NodeMutation::*;
         let MutationSet {
             old_root,
@@ -644,6 +759,8 @@ impl<S: SmtStorage> LargeSmt<S> {
                 reverse_pairs.insert(key, Self::EMPTY_VALUE);
             }
         }
+
+        self.set_root(new_root);
 
         Ok(MutationSet {
             old_root: new_root,

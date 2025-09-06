@@ -8,7 +8,7 @@ use crate::{
         EmptySubtreeRoots, InnerNode, NodeIndex, SmtLeaf,
         smt::{
             Map,
-            full::large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
+            large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
         },
     },
 };

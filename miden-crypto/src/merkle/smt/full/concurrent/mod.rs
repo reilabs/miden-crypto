@@ -14,9 +14,9 @@ use crate::merkle::{
 };
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 
-pub(crate) type MutatedSubtreeLeaves = Vec<Vec<SubtreeLeaf>>;
+pub(in crate::merkle::smt) type MutatedSubtreeLeaves = Vec<Vec<SubtreeLeaf>>;
 
 // CONCURRENT IMPLEMENTATIONS
 // ================================================================================================
@@ -233,9 +233,7 @@ impl Smt {
     ///
     /// # Errors
     /// Returns an error if the provided entries contain multiple values for the same key.
-    pub(crate) fn build_subtrees(
-        mut entries: Vec<(Word, Word)>,
-    ) -> Result<(InnerNodes, Leaves), MerkleError> {
+    fn build_subtrees(mut entries: Vec<(Word, Word)>) -> Result<(InnerNodes, Leaves), MerkleError> {
         entries.par_sort_unstable_by_key(|item| {
             let index = Self::key_to_leaf_index(&item.0);
             index.value()
@@ -259,7 +257,7 @@ impl Smt {
     /// # Panics
     /// With debug assertions on, this function panics if it detects that `pairs` is not correctly
     /// sorted. Without debug assertions, the returned computations will be incorrect.
-    pub(crate) fn sorted_pairs_to_leaves(
+    pub(in crate::merkle::smt) fn sorted_pairs_to_leaves(
         pairs: Vec<(Word, Word)>,
     ) -> Result<PairComputations<u64, SmtLeaf>, MerkleError> {
         process_sorted_pairs_to_leaves(pairs, Self::pairs_to_leaf)
@@ -354,10 +352,10 @@ impl Smt {
 // ================================================================================================
 
 /// A subtree is of depth 8.
-pub(crate) const SUBTREE_DEPTH: u8 = 8;
+pub(in crate::merkle::smt) const SUBTREE_DEPTH: u8 = 8;
 
 /// A depth-8 subtree contains 256 "columns" that can possibly be occupied.
-pub(crate) const COLS_PER_SUBTREE: u64 = u64::pow(2, SUBTREE_DEPTH as u32);
+pub(in crate::merkle::smt) const COLS_PER_SUBTREE: u64 = u64::pow(2, SUBTREE_DEPTH as u32);
 
 /// Helper struct for organizing the data we care about when computing Merkle subtrees.
 ///
@@ -373,7 +371,7 @@ pub struct SubtreeLeaf {
 
 /// Helper struct to organize the return value of [`Smt::sorted_pairs_to_leaves()`].
 #[derive(Debug, Clone)]
-pub(crate) struct PairComputations<K, L> {
+pub(in crate::merkle::smt) struct PairComputations<K, L> {
     /// Literal leaves to be added to the sparse Merkle tree's internal mapping.
     pub nodes: Map<K, L>,
     /// "Conceptual" leaves that will be used for computations.
@@ -391,7 +389,7 @@ impl<K, L> Default for PairComputations<K, L> {
 }
 
 #[derive(Debug)]
-pub(crate) struct SubtreeLeavesIter<'s> {
+pub(in crate::merkle::smt) struct SubtreeLeavesIter<'s> {
     leaves: core::iter::Peekable<alloc::vec::Drain<'s, SubtreeLeaf>>,
 }
 

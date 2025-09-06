@@ -2,7 +2,7 @@ use crate::{
     Word,
     merkle::{
         NodeIndex, SmtLeaf,
-        smt::{Map, full::large::subtree::Subtree},
+        smt::{Map, large::subtree::Subtree},
     },
 };
 

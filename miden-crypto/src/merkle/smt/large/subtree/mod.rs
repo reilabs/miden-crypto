@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
-use super::{EmptySubtreeRoots, InnerNode, InnerNodeInfo, NodeIndex, SMT_DEPTH, SUBTREE_DEPTH};
-use crate::{Word, merkle::smt::Map};
+use super::{EmptySubtreeRoots, InnerNode, InnerNodeInfo, NodeIndex, SMT_DEPTH};
+use crate::{
+    Word,
+    merkle::smt::{Map, full::concurrent::SUBTREE_DEPTH},
+};
 
 mod error;
 pub use error::SubtreeError;
@@ -9,10 +12,30 @@ pub use error::SubtreeError;
 #[cfg(test)]
 mod tests;
 
-/// Represents a complete 8-depth subtree that can be serialized into a single RocksDB entry.
+/// Represents a complete 8-depth subtree that is serialized into a single RocksDB entry.
+///
+/// ### What is stored
+/// - `nodes` tracks only **non-empty inner nodes** of this subtree (i.e., nodes for which at least
+///   one child differs from the canonical empty hash). Each entry stores an `InnerNode` (hash
+///   pair).
+///
+/// ### Local index layout (how indices are computed)
+/// - Indices are **subtree-local** and follow binary-heap (level-order) layout: `root = 0`;
+///   children of `i` are at `2i+1` and `2i+2`.
+/// - Equivalently, given a `(depth, value)` from the parent tree, the local index is obtained by
+///   taking the node’s depth **relative to the subtree root** and its left-to-right position within
+///   that level (offset by the total number of nodes in all previous levels).
+///
+/// ### Serialization (`to_vec` / `from_vec`)
+/// - Uses a **512-bit bitmask** (2 bits per node) to mark non-empty left/right children, followed
+///   by a packed stream of `Word` hashes for each set bit.
+/// - Children equal to the canonical empty hash are omitted in the byte representation and
+///   reconstructed on load using `EmptySubtreeRoots` and the child’s depth in the parent tree.
 #[derive(Debug, Clone)]
 pub struct Subtree {
+    /// Index of this subtree's root in the parent SMT.
     root_index: NodeIndex,
+    /// Inner nodes keyed by subtree-local index (binary-heap order).
     nodes: Map<u8, InnerNode>,
 }
 
@@ -53,6 +76,20 @@ impl Subtree {
         self.nodes.get(&local_index).cloned()
     }
 
+    /// Serializes this subtree into a compact byte representation.
+    ///
+    /// The encoding has two components:
+    ///
+    /// **Bitmask (512 bits)** — Each internal node (up to 255 total) is assigned 2 bits:
+    /// one for the left child and one for the right child. A bit is set if the corresponding
+    /// child differs from the canonical empty hash at its depth. This avoids storing empty
+    /// children.
+    ///
+    /// **Hash data** — For every set bit in the mask, the corresponding 32-byte `Word` hash
+    /// is appended to the data section. Hashes are written in breadth-first (local index)
+    /// order, scanning children left-then-right.
+    ///
+    /// On deserialization, omitted children are reconstructed using `EmptySubtreeRoots`.
     pub fn to_vec(&self) -> Vec<u8> {
         let mut data = Vec::with_capacity(self.len() * Self::HASH_SIZE);
         let mut bitmask = [0u8; Self::BITMASK_SIZE];
@@ -92,6 +129,17 @@ impl Subtree {
         (bitmask[bit_offset / 8] >> (bit_offset % 8)) & 1 != 0
     }
 
+    /// Deserializes a subtree from its compact byte representation.
+    ///
+    /// The first 512 bits form the bitmask, which indicates which child hashes
+    /// are present for each internal node (2 bits per node). For every set bit,
+    /// a `Word` hash is read sequentially from the data section.
+    ///
+    /// When a child bit is unset, the corresponding hash is reconstructed from
+    /// `EmptySubtreeRoots` based on the child’s depth in the full tree.
+    ///
+    /// Errors are returned if the byte slice is too short, contains an unexpected
+    /// number of hashes, or leaves unconsumed data at the end.
     pub fn from_vec(root_index: NodeIndex, data: &[u8]) -> Result<Self, SubtreeError> {
         if data.len() < Self::BITMASK_SIZE {
             return Err(SubtreeError::TooShort {

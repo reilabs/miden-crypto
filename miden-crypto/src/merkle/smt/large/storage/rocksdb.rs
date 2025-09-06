@@ -15,7 +15,7 @@ use crate::{
         InnerNode, NodeIndex, SmtLeaf,
         smt::{
             Map,
-            full::large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
+            large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
         },
     },
 };
@@ -330,6 +330,9 @@ impl SmtStorage for RocksDbStorage {
     /// 3. Updating the leaf and entry counts in the metadata column family.
     /// 4. Writing all changes (leaf data, counts) to RocksDB in a single batch.
     ///
+    /// Note: This only updates the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
+    ///
     /// # Errors
     /// - `StorageError::Backend`: If column families are missing or a RocksDB error occurs.
     /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
@@ -401,6 +404,9 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// Returns `Ok(None)` if the leaf at `index` does not exist or the `key` is not found.
     ///
+    /// Note: This only updates the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
+    ///
     /// # Errors
     /// - `StorageError::Backend`: If column families are missing or a RocksDB error occurs.
     /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
@@ -459,6 +465,8 @@ impl SmtStorage for RocksDbStorage {
     ///
     /// Note: This method assumes the provided `leaves` map represents the entirety
     /// of leaves to be stored or that counts are being explicitly reset.
+    /// Note: This only updates the leaves. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
     ///
     /// # Errors
     /// - `StorageError::Backend`: If column families are missing or a RocksDB error occurs.
@@ -485,6 +493,9 @@ impl SmtStorage for RocksDbStorage {
     /// in the metadata. Callers are responsible for managing these counts separately
     /// if using this method directly, or preferably use `apply` or `remove_value` which handle
     /// counts.
+    ///
+    /// Note: This only removes the leaf. Callers are responsible for recomputing and
+    /// persisting the corresponding inner nodes.
     ///
     /// # Errors
     /// - `StorageError::Backend`: If the leaves column family is missing or a RocksDB error occurs.

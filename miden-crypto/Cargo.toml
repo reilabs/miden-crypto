@@ -45,6 +45,11 @@ harness = false
 name    = "smt-with-entries"
 
 [[bench]]
+harness           = false
+name              = "large-smt"
+required-features = ["rocksdb"]
+
+[[bench]]
 harness = false
 name    = "store"
 

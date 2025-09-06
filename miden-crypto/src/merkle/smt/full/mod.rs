@@ -15,21 +15,9 @@ mod proof;
 pub use proof::SmtProof;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
-#[cfg(feature = "concurrent")]
-mod large;
-#[cfg(feature = "concurrent")]
-pub use large::{
-    LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, StorageUpdateParts, StorageUpdates,
-    Subtree, SubtreeError,
-};
-#[cfg(feature = "rocksdb")]
-pub use large::{RocksDbConfig, RocksDbStorage};
-
 // Concurrent implementation
 #[cfg(feature = "concurrent")]
-mod concurrent;
-#[cfg(feature = "internal")]
-pub use concurrent::{SubtreeLeaf, build_subtree_for_bench};
+pub(in crate::merkle::smt) mod concurrent;
 
 #[cfg(test)]
 mod tests;
