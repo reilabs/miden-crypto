@@ -1,0 +1,38 @@
+# .github/actions/install-llvm/action.yml
+name: "Install LLVM"
+description: "Install a specific LLVM/Clang version"
+inputs:
+  version:
+    description: "LLVM major version to install"
+    default: "17"
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        set -eux
+        CODENAME="$(. /etc/os-release && echo "$UBUNTU_CODENAME")"
+
+        # Add apt.llvm.org repo
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | \
+          sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] \
+          http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${{ inputs.version }} main" | \
+          sudo tee /etc/apt/sources.list.d/llvm.list
+
+        sudo apt-get update
+        sudo apt-get install -y \
+          clang-${{ inputs.version }} \
+          libclang-${{ inputs.version }}-dev \
+          llvm-${{ inputs.version }}-dev \
+          lld-${{ inputs.version }}
+
+        # Export env & add LLVM bin to PATH
+        echo "LIBCLANG_PATH=/usr/lib/llvm-${{ inputs.version }}/lib" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=/usr/lib/llvm-${{ inputs.version }}/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        echo "/usr/lib/llvm-${{ inputs.version }}/bin" >> "$GITHUB_PATH"
+
+        # make LLVM the toolchain for C/C++
+        echo "CC=clang-${{ inputs.version }}" >> "$GITHUB_ENV"
+        echo "CXX=clang++-${{ inputs.version }}" >> "$GITHUB_ENV"
