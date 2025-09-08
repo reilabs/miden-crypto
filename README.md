@@ -38,20 +38,20 @@ For performance benchmarks of these hash functions and their comparison to other
 - `PartialMmr`: a partial view of a Merkle mountain range structure.
 - `SimpleSmt`: a Sparse Merkle Tree (with no compaction), mapping 64-bit keys to 4-element values.
 - `Smt`: a Sparse Merkle tree (with compaction at depth 64), mapping 4-element keys to 4-element values.
-- `LargeSmt`: a large-scale Sparse Merkle tree backed by pluggable storage (e.g., RocksDB), optimized for datasets that exceed available memory.
+- `LargeSmt`: a large-scale Sparse Merkle tree backed by pluggable storage (e.g., [RocksDB](https://github.com/facebook/rocksdb)), optimized for datasets that exceed available memory.
 
 The module also contains additional supporting components such as `NodeIndex`, `MerklePath`, `SparseMerklePath`, and `MerkleError` to assist with tree indexation, opening proofs, and reporting inconsistent arguments/state. `SparseMerklePath` provides a memory-efficient representation for Merkle paths with nodes representing empty subtrees.
 
 ### Large Sparse Merkle Tree (LargeSmt)
 
-`LargeSmt` is a sparse Merkle tree for very large key-value sets. It keeps only the upper part of the tree (depths 0–23) in memory for fast access while storing the deeper levels (depths 24–64) in external storage as fixed-size subtrees. This hybrid layout enables scaling beyond RAM limits while maintaining good performance for inserts, updates, and openings.
+`LargeSmt` (available only when the `concurrent` feature is enabled) is a sparse Merkle tree for very large key-value sets. It keeps only the upper part of the tree (depths 0–23) in memory for fast access while storing the deeper levels (depths 24–64) in external storage as fixed-size subtrees. This hybrid layout enables scaling beyond RAM limits while maintaining good performance for inserts, updates, and openings.
 
 Key properties:
 - In-memory top: a flat array of inner nodes for depths 0–23.
 - Storage-backed bottom: Lower depths are organized in subtrees and stored via a storage interface. We provide an in-memory implementation and RocksDB backend behind a feature flag.
 - Supports batch construction and mutation sets for efficient batched updates.
 
-When the `rocksdb` feature is enabled, `LargeSmt` can persist the lower subtrees and leaves to disk using RocksDB. On reopen, the in-memory top (depths 0–23) is reconstructed from persisted subtree roots. Without `rocksdb`, an in-memory storage implementation is available for testing and smaller datasets.
+When the `rocksdb` feature is enabled, `LargeSmt` can persist the lower subtrees and leaves to disk using [RocksDB](https://github.com/facebook/rocksdb). On reopen, the in-memory top (depths 0–23) is reconstructed from persisted subtree roots. Without `rocksdb`, an in-memory storage implementation is available for testing and smaller
 
 ## Signatures
 
