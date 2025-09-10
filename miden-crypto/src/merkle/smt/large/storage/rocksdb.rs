@@ -612,7 +612,7 @@ impl SmtStorage for RocksDbStorage {
             .filter(|(_, bucket)| !bucket.is_empty())
             .map(
                 |(bucket_index, bucket)| -> Result<Vec<(usize, Option<Subtree>)>, StorageError> {
-                    let depth = LargeSmt::SUBTREE_DEPTHS[bucket_index];
+                    let depth = LargeSmt::<RocksDbStorage>::SUBTREE_DEPTHS[bucket_index];
                     let cf = self.cf_handle(cf_for_depth(depth))?;
                     let keys: Vec<_> =
                         bucket.iter().map(|(_, idx)| Self::subtree_db_key(*idx)).collect();
