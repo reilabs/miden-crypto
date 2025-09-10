@@ -1,6 +1,7 @@
-## 0.17.0 (TBD)
+## 0.17.0 (2025-09-10)
 
 - Added `LargeSmt`, SMT backed by RocksDB ([#438](https://github.com/0xMiden/miden-crypto/pull/438)).
+- Added ECDSA and ECDH modules ([#475](https://github.com/0xMiden/crypto/pull/475)).
 - added arithmetization oriented authenticated encryption with associated data (AEAD) scheme ([#480](https://github.com/0xMiden/crypto/pull/480)).
 - Added XChaCha20-Poly1305 AEAD scheme ([#484](https://github.com/0xMiden/crypto/pull/484)).
 - [BREAKING] `SmtLeaf::entries()` now returns a slice ([#521](https://github.com/0xMiden/crypto/pull/521)).
