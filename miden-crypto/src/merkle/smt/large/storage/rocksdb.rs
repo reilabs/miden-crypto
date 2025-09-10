@@ -8,14 +8,14 @@ use rocksdb::{
 };
 use winter_utils::{Deserializable, Serializable};
 
-use super::{LargeSmt, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
+use super::{SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
         InnerNode, NodeIndex, SmtLeaf,
         smt::{
             Map,
-            large::{IN_MEMORY_DEPTH, subtree::Subtree},
+            large::{IN_MEMORY_DEPTH, LargeSmt, subtree::Subtree},
         },
     },
 };
