@@ -8,14 +8,14 @@ use rocksdb::{
 };
 use winter_utils::{Deserializable, Serializable};
 
-use super::{SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
+use super::{LargeSmt, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 use crate::{
     EMPTY_WORD, Word,
     merkle::{
         InnerNode, NodeIndex, SmtLeaf,
         smt::{
             Map,
-            large::{IN_MEMORY_DEPTH, SUBTREE_DEPTHS, subtree::Subtree},
+            large::{IN_MEMORY_DEPTH, subtree::Subtree},
         },
     },
 };
@@ -612,7 +612,7 @@ impl SmtStorage for RocksDbStorage {
             .filter(|(_, bucket)| !bucket.is_empty())
             .map(
                 |(bucket_index, bucket)| -> Result<Vec<(usize, Option<Subtree>)>, StorageError> {
-                    let depth = SUBTREE_DEPTHS[bucket_index];
+                    let depth = LargeSmt::SUBTREE_DEPTHS[bucket_index];
                     let cf = self.cf_handle(cf_for_depth(depth))?;
                     let keys: Vec<_> =
                         bucket.iter().map(|(_, idx)| Self::subtree_db_key(*idx)).collect();
