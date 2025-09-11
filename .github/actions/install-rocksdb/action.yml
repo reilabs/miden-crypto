@@ -1,0 +1,14 @@
+name: "Install RocksDB"
+description: "Install system RocksDB and export ROCKSDB_LIB_DIR/ROCKSDB_INCLUDE_DIR"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        set -eux
+        sudo apt update
+        sudo apt install -y librocksdb-dev
+
+        echo "ROCKSDB_LIB_DIR=/usr/lib/$(uname -m)-linux-gnu" >> "$GITHUB_ENV"
+        echo "ROCKSDB_INCLUDE_DIR=/usr/include" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=/usr/lib/$(uname -m)-linux-gnu:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"

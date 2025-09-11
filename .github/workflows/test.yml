@@ -35,6 +35,9 @@ jobs:
         uses: ./.github/actions/install-llvm
         with:
           version: "17"
+      - name: Install RocksDB
+        if: ${{ matrix.args == 'large-smt' }}
+        uses: ./.github/actions/install-rocksdb
       - name: Perform tests
         run: |
           rustup update --no-self-update ${{matrix.toolchain}}
@@ -72,6 +75,8 @@ jobs:
         uses: ./.github/actions/install-llvm
         with:
           version: "17"
+      - name: Install RocksDB
+        uses: ./.github/actions/install-rocksdb
       - name: Run doc-tests
         run: |
           rustup update --no-self-update
