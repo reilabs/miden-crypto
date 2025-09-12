@@ -1,3 +1,7 @@
+## 0.18.0 (TBD)
+
+- [BREAKING] Incremented MSRV to 1.89.
+
 ## 0.17.0 (2025-09-12)
 
 - Added `LargeSmt`, SMT backed by RocksDB ([#438](https://github.com/0xMiden/miden-crypto/pull/438)).
@@ -16,7 +20,7 @@
 
 - [BREAKING] Incremented MSRV to 1.88.
 - Added implementation of Poseidon2 hash function ([#429](https://github.com/0xMiden/crypto/issues/429)).
-- [BREAKING] Make Falcon DSA deterministic ([#436](https://github.com/0xMiden/crypto/pull/436).
+- [BREAKING] Make Falcon DSA deterministic ([#436](https://github.com/0xMiden/crypto/pull/436)).
 - [BREAKING] Remove generics from `MerkleStore` and remove `KvMap` and `RecordingMap` ([#442](https://github.com/0xMiden/crypto/issues/442)).
 - [BREAKING] Rename `smt_hashmaps` feature to `hashmaps` ([#442](https://github.com/0xMiden/crypto/issues/442)).
 - [BREAKING] Refactor `parse_hex_string_as_word()` to `Word::parse()` ([#450](https://github.com/0xMiden/crypto/issues/450)).
