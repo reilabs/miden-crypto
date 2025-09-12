@@ -1,4 +1,4 @@
-## 0.17.0 (2025-09-10)
+## 0.17.0 (2025-09-12)
 
 - Added `LargeSmt`, SMT backed by RocksDB ([#438](https://github.com/0xMiden/miden-crypto/pull/438)).
 - Added ECDSA and ECDH modules ([#475](https://github.com/0xMiden/crypto/pull/475)).
