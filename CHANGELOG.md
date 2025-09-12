@@ -1,7 +1,16 @@
+## 0.17.0 (2025-09-12)
+
+- Added `LargeSmt`, SMT backed by RocksDB ([#438](https://github.com/0xMiden/miden-crypto/pull/438)).
+- Added ECDSA and ECDH modules ([#475](https://github.com/0xMiden/crypto/pull/475)).
+- added arithmetization oriented authenticated encryption with associated data (AEAD) scheme ([#480](https://github.com/0xMiden/crypto/pull/480)).
+- Added XChaCha20-Poly1305 AEAD scheme ([#484](https://github.com/0xMiden/crypto/pull/484)).
+- [BREAKING] `SmtLeaf::entries()` now returns a slice ([#521](https://github.com/0xMiden/crypto/pull/521)).
+
 ## 0.16.1 (2025-08-21)
 
 - Fix broken imports in CPU-specific `rescue` implementations (AVX2, SVE) ([#492](https://github.com/0xMiden/crypto/pull/492/)).
 - Added `{Smt,PartialSmt}::inner_node_indices` to make inner nodes accessible ([#494](https://github.com/0xMiden/crypto/pull/494)).
+- Added various benchmarks & related bench utilities ([#503](https://github.com/0xMiden/crypto/pull/503))
 
 ## 0.16.0 (2025-08-15)
 
@@ -14,6 +23,7 @@
 - `Smt.insert_inner_nodes` does not store empty subtrees ([#452](https://github.com/0xMiden/crypto/pull/452)).
 - Optimized `Smt::num_entries()` ([#455](https://github.com/0xMiden/crypto/pull/455)).
 - [BREAKING] Disallow leaves with more than 2^16 entries ([#455](https://github.com/0xMiden/crypto/pull/455), [#462](https://github.com/0xMiden/crypto/pull/462)).
+-  Add ECDSA over secp256k1 curve ([#475](https://github.com/0xMiden/crypto/pull/475)).
 - [BREAKING] Modified the public key in Falcon DSA to be the polynomial instead of the commitment ([#460](https://github.com/0xMiden/crypto/pull/460)).
 - [BREAKING] Use `SparseMerklePath` in SMT proofs for better memory efficiency ([#477](https://github.com/0xMiden/crypto/pull/477)).
 - [BREAKING] Rename `SparseValuePath` to `SimpleSmtProof` ([#477](https://github.com/0xMiden/crypto/pull/477)).
