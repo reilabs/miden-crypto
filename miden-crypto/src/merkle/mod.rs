@@ -42,6 +42,8 @@ pub use mmr::{Forest, InOrderIndex, Mmr, MmrDelta, MmrError, MmrPeaks, MmrProof,
 mod store;
 pub use store::{MerkleStore, StoreNode};
 
+mod forest;
+
 mod node;
 pub use node::InnerNodeInfo;
 

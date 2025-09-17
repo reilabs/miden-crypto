@@ -229,7 +229,7 @@ impl SmtLeaf {
     /// # Errors
     /// Returns an error if inserting the key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024
     /// entries) in the leaf.
-    pub(in crate::merkle::smt) fn insert(
+    pub(in crate::merkle) fn insert(
         &mut self,
         key: Word,
         value: Word,
