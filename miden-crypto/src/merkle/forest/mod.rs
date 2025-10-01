@@ -170,11 +170,24 @@ impl SmtForest {
         root: Word,
         entries: &Map<Word, Word>,
     ) -> Result<Word, MerkleError> {
-        let mut new_root = root;
-        for (key, value) in entries.iter() {
-            new_root = self.insert(new_root, *key, *value)?;
+        if !self.roots.contains(&root) {
+            return Err(MerkleError::RootNotInStore(root));
         }
 
-        Ok(new_root)
+        let mut nodes_for_update = Map::<NodeIndex, Word>::new();
+        for (key, value) in entries.iter() {
+            let entry_index = key[3].as_int();
+            let entry_node_index = NodeIndex::new(SMT_DEPTH, entry_index)?;
+
+            // Store Merkle proof nodes, so we can use them to calculate updated values
+            let path_nodes = self.store.get_path_nodes(root, entry_node_index)?;
+            nodes_for_update.extend(path_nodes);
+
+            // Merkle proof nodes can be also the one we're inserting, so update their values
+            nodes_for_update.insert(entry_node_index, *value);
+        }
+        
+
+        self.store.update_nodes(root, &nodes_for_update)
     }
 }

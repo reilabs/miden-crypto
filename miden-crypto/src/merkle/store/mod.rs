@@ -6,8 +6,7 @@ use super::{
     PartialMerkleTree, RootPath, Rpo256, SimpleSmt, Smt, Word, mmr::Mmr,
 };
 use crate::{
-    Map,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    merkle::SMT_DEPTH, utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}, Map
 };
 
 #[cfg(test)]
@@ -179,6 +178,66 @@ impl MerkleStore {
 
         Ok(MerkleProof::new(hash, MerklePath::new(path)))
     }
+
+    // TODO comment
+    pub fn get_path_nodes(&self, root: Word, index: NodeIndex) -> Result<Map::<NodeIndex, Word>, MerkleError> {
+        let mut hash = root;
+        let mut path = Map::<NodeIndex, Word>::new();
+
+        // corner case: check the root is in the store when called with index `NodeIndex::root()`
+        self.nodes.get(&hash).ok_or(MerkleError::RootNotInStore(hash))?;
+
+        let mut pos = 0; // Root position at level 0
+        for i in (0..index.depth()).rev() {
+            let node = self
+                .nodes
+                .get(&hash)
+                .ok_or(MerkleError::NodeIndexNotFoundInStore(hash, index))?;
+
+            let bit = (index.value() >> i) & 1;
+            let depth = index.depth() - i;
+            hash = if bit == 0 {
+                pos = pos * 2 + 1;
+                path.insert(NodeIndex::new(depth, pos)?, node.right);
+                node.left
+            } else {
+                pos = pos * 2;
+                path.insert(NodeIndex::new(depth, pos)?, node.left);
+                node.right
+            }
+        }
+        Ok(path)
+    }
+
+    // TODO comment
+    // TODO this should be in a different section since it mutates the store
+    pub fn update_nodes(
+        &mut self,
+        root: Word,
+        entries: &Map<NodeIndex, Word>,
+    ) -> Result<Word, MerkleError> {
+        let mut nodes_for_update = entries.clone();
+
+        // .into_iter() allegedly sorts by key and NodeIndex are comparable by depth,
+        // so this should start at the leaves nodes and move up
+        for (index, value) in entries.into_iter().rev() {
+            if index.depth() == SMT_DEPTH {
+                self.nodes.insert(*value, StoreNode { left: Word::empty(), right: Word::empty() });
+                continue;
+            }
+            let left_index = index.left_child();
+            let right_index = index.right_child();
+            let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInStore(*value, left_index))?;
+            let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInStore(*value, right_index))?;
+            let new_value = Rpo256::merge(&[*left_value, *right_value]);
+            self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
+
+            nodes_for_update.insert(*index, new_value);
+        }
+
+        Ok(nodes_for_update.get(&NodeIndex::root()).ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?.clone())
+    }
+
 
     // LEAF TRAVERSAL
     // --------------------------------------------------------------------------------------------
