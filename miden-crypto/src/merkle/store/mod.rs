@@ -155,7 +155,7 @@ impl MerkleStore {
     pub fn get_path(&self, root: Word, index: NodeIndex) -> Result<MerkleProof, MerkleError> {
         let (value, path) = self.get_indexed_path(root, index)?;
         let path = path.into_values().rev().collect::<Vec<_>>();
-        
+
         Ok(MerkleProof::new(value, MerklePath::new(path)))
     }
 
