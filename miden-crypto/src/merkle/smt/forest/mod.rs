@@ -172,17 +172,20 @@ impl SmtForest {
             return Err(MerkleError::RootNotInStore(root));
         }
 
-        // calculate new key-value pairs for the leaves
+        // Calculate new leaves for updated key-value pairs
         let mut new_leaves = BTreeMap::<u64, SmtLeaf>::new();
         for (key, value) in entries {
             let index = key[3].as_int();
             if let Some(leaf) = new_leaves.get_mut(&index) {
+                // We've already mutated this leaf, add the new key-value pair to it
                 leaf.insert(*key, *value).map_err(to_merkle_error)?;
             } else if let Some(leaf) = self.leaves.get(&index) {
+                // Create a mutation of an existing leaf
                 let mut new_leaf = leaf.clone();
                 new_leaf.insert(*key, *value).map_err(to_merkle_error)?;
                 new_leaves.insert(index, new_leaf);
             } else {
+                // Create a new leaf for a new key-value pair
                 let new_leaf = SmtLeaf::new_single(*key, *value);
                 new_leaves.insert(index, new_leaf);
             }

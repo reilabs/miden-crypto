@@ -181,10 +181,10 @@ impl MerkleStore {
         Ok(MerkleProof::new(hash, MerklePath::new(path)))
     }
 
-    /// Returns the opening to the `root` of the node at the specified `index`.
+    /// Returns the node at the specified `index` and its opening to the `root`.
     ///
-    /// The path starts at the sibling of the target leaf and contains indices
-    /// of all nodes in the opening.
+    /// The path starts below the root and contains all nodes in the opening
+    /// all the way to the sibling of the target leaf.
     ///
     /// # Errors
     /// This method can return the following errors:
@@ -195,7 +195,7 @@ impl MerkleStore {
         &self,
         root: Word,
         index: NodeIndex,
-    ) -> Result<Map<NodeIndex, Word>, MerkleError> {
+    ) -> Result<(Word, Map<NodeIndex, Word>), MerkleError> {
         let mut hash = root;
         let mut path = Map::<NodeIndex, Word>::new();
 
@@ -221,7 +221,8 @@ impl MerkleStore {
                 node.right
             }
         }
-        Ok(path)
+
+        Ok((hash, path))
     }
 
     // LEAF TRAVERSAL
@@ -510,8 +511,11 @@ impl MerkleStore {
         let mut nodes_by_index = Map::<NodeIndex, Word>::new();
         for (index, leaf_hash) in entries {
             // Record all sibling nodes along the path from root to this index
-            // TODO: remove when not updating the value
-            let path_nodes = self.get_indexed_path(root, index)?;
+            let (old_value, path_nodes) = self.get_indexed_path(root, index)?;
+            if old_value == leaf_hash {
+                continue;
+            }
+
             nodes_by_index.extend(path_nodes);
 
             // Record the updated leaf value at this index
