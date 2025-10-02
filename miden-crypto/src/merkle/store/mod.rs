@@ -1,4 +1,5 @@
-use alloc::vec::Vec;
+use alloc::vec::{Vec};
+use alloc::collections::VecDeque;
 use core::borrow::Borrow;
 
 use super::{
@@ -197,12 +198,12 @@ impl MerkleStore {
             let bit = (index.value() >> i) & 1;
             let depth = index.depth() - i;
             hash = if bit == 0 {
-                pos = pos * 2 + 1;
-                path.insert(NodeIndex::new(depth, pos)?, node.right);
+                path.insert(NodeIndex::new(depth, pos * 2 + 1)?, node.right);
+                pos = pos * 2;
                 node.left
             } else {
-                pos = pos * 2;
-                path.insert(NodeIndex::new(depth, pos)?, node.left);
+                path.insert(NodeIndex::new(depth, pos * 2)?, node.left);
+                pos = pos * 2 + 1;
                 node.right
             }
         }
@@ -218,21 +219,44 @@ impl MerkleStore {
     ) -> Result<Word, MerkleError> {
         let mut nodes_for_update = entries.clone();
 
-        // .into_iter() allegedly sorts by key and NodeIndex are comparable by depth,
-        // so this should start at the leaves nodes and move up
-        for (index, value) in entries.into_iter().rev() {
-            if index.depth() == SMT_DEPTH {
-                self.nodes.insert(*value, StoreNode { left: Word::empty(), right: Word::empty() });
-                continue;
+        for (index, _) in nodes_for_update.iter() {
+            if index.depth() >= 60 {
+                std::println!("Available node: {:?}", index);
             }
-            let left_index = index.left_child();
-            let right_index = index.right_child();
-            let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInStore(*value, left_index))?;
-            let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInStore(*value, right_index))?;
-            let new_value = Rpo256::merge(&[*left_value, *right_value]);
-            self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
+        }
 
-            nodes_for_update.insert(*index, new_value);
+        let mut last = NodeIndex::root();
+        let mut queue: VecDeque<NodeIndex> = VecDeque::new();
+        for (index, _) in entries.into_iter().rev() {
+            if index.depth() < SMT_DEPTH {
+                break;
+            }
+            queue.push_back(index.clone());
+            last = index.clone();
+        }
+
+        while let Some(index) = queue.pop_front() {
+            std::println!("Visiting: {:?}", index);
+            let parent = index.parent();
+            if parent != last {
+                queue.push_back(parent.clone());
+            }
+            last = parent;
+
+            if index.depth() == SMT_DEPTH {
+                let value = nodes_for_update.get(&index).ok_or(MerkleError::NodeIndexNotFoundInStore(root, index))?;
+                self.nodes.insert(*value, StoreNode { left: Word::empty(), right: Word::empty() });
+            } else {
+                let left_index = index.left_child();
+                let right_index = index.right_child();
+                std::println!("Left child: {:?}", left_index);
+                std::println!("Right child: {:?}", right_index);    
+                let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
+                let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
+                let new_value = Rpo256::merge(&[*left_value, *right_value]);
+                self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
+                nodes_for_update.insert(index, new_value);
+            }
         }
 
         Ok(nodes_for_update.get(&NodeIndex::root()).ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?.clone())

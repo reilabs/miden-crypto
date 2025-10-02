@@ -174,20 +174,36 @@ impl SmtForest {
             return Err(MerkleError::RootNotInStore(root));
         }
 
+        // calculate new key-value pairs for the leaves
+        let mut new_leaves = BTreeMap::<u64, SmtLeaf>::new();
+        for (key, value) in entries {
+            let index = key[3].as_int();
+            if let Some(leaf) = new_leaves.get_mut(&index) {
+                leaf.insert(*key, *value).unwrap();
+            } else if let Some(leaf) = self.leaves.get(&index) {
+                let mut new_leaf = leaf.clone();
+                new_leaf.insert(*key, *value).unwrap();
+                new_leaves.insert(index, new_leaf);
+            } else {
+                let new_leaf = SmtLeaf::new_single(*key, *value);
+                new_leaves.insert(index, new_leaf);
+            }
+        }
+
+        std::println!("new leaves {new_leaves:?}");
+
         let mut nodes_for_update = Map::<NodeIndex, Word>::new();
-        for (key, value) in entries.iter() {
-            let entry_index = key[3].as_int();
-            let entry_node_index = NodeIndex::new(SMT_DEPTH, entry_index)?;
+        for (index, leaf) in new_leaves.iter() {
+            let entry_node_index = NodeIndex::new(SMT_DEPTH, *index)?;
 
             // Store Merkle proof nodes, so we can use them to calculate updated values
             let path_nodes = self.store.get_path_nodes(root, entry_node_index)?;
             nodes_for_update.extend(path_nodes);
 
             // Merkle proof nodes can be also the one we're inserting, so update their values
-            nodes_for_update.insert(entry_node_index, *value);
+            nodes_for_update.insert(entry_node_index, leaf.hash());
         }
         
-
         self.store.update_nodes(root, &nodes_for_update)
     }
 }

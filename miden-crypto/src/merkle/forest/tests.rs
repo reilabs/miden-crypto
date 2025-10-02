@@ -92,7 +92,7 @@ fn test_batch_insert() -> Result<(), MerkleError> {
 
     let values = Map::<Word, Word>::from_iter([
         (Word::new([ZERO; WORD_SIZE]), Word::new([ONE; WORD_SIZE])),
-        (Word::new([ZERO; WORD_SIZE]), Word::new([ONE; WORD_SIZE])),
+        (Word::new([ZERO, ONE, ZERO, ZERO]), Word::new([ONE; WORD_SIZE])),
         (Word::new([ZERO, ONE, ZERO, ONE]), Word::new([ONE; WORD_SIZE])),
     ]);
 
@@ -100,10 +100,10 @@ fn test_batch_insert() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new(1600265794710932756),
-            Felt::new(4102884415474859847),
-            Felt::new(7916203901318401823),
-            Felt::new(9187865964280213047)
+            Felt::new(6703167280526557258),
+            Felt::new(18389096225374738330),
+            Felt::new(5605267564941856750),
+            Felt::new(14623616106397295145)
         ])
     );
 
