@@ -128,7 +128,6 @@ impl SmtForest {
 
         let index = key[3].as_int();
         let node_index = NodeIndex::new(SMT_DEPTH, index)?;
-        let path = self.store.get_path(root, node_index)?.path;
 
         let leaf_hash = match self.leaves.get_mut(&index) {
             // Leaf for this key already exists; update it and return its hash.
@@ -153,7 +152,8 @@ impl SmtForest {
                 leaf_hash
             },
         };
-        let new_root = self.store.add_merkle_path(index, leaf_hash, path)?;
+
+        let new_root = self.store.set_node(root, node_index, leaf_hash)?.root;
         self.roots.insert(new_root);
 
         Ok(new_root)
