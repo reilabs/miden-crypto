@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 
 use super::{EmptySubtreeRoots, MerkleError, SmtForest, Word};
 use crate::{
-    Felt, Map, ONE, WORD_SIZE, ZERO,
+    Felt, ONE, WORD_SIZE, ZERO,
     merkle::{int_to_node, smt::SMT_DEPTH},
 };
 
@@ -90,13 +90,13 @@ fn test_batch_insert() -> Result<(), MerkleError> {
 
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
-    let values = Map::<Word, Word>::from_iter([
+    let values = vec![
         (Word::new([ZERO; WORD_SIZE]), Word::new([ONE; WORD_SIZE])),
         (Word::new([ZERO, ONE, ZERO, ZERO]), Word::new([ONE; WORD_SIZE])),
         (Word::new([ZERO, ONE, ZERO, ONE]), Word::new([ONE; WORD_SIZE])),
-    ]);
+    ];
 
-    let new_root = forest.batch_insert(empty_tree_root, &values)?;
+    let new_root = forest.batch_insert(empty_tree_root, values)?;
     assert_eq!(
         new_root,
         Word::new([

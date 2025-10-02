@@ -5,7 +5,6 @@ use alloc::{
 
 use super::{EmptySubtreeRoots, MerkleError, NodeIndex, SmtLeaf, SmtProof, Word};
 use crate::{
-    Map,
     merkle::{MerkleStore, SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH},
 };
 
@@ -128,33 +127,7 @@ impl SmtForest {
     /// enough data in the forest to perform the insert, or if the insert would create a leaf
     /// with too many entries.
     pub fn insert(&mut self, root: Word, key: Word, value: Word) -> Result<Word, MerkleError> {
-        if !self.roots.contains(&root) {
-            return Err(MerkleError::RootNotInStore(root));
-        }
-
-        let index = key[3].as_int();
-        let node_index = NodeIndex::new(SMT_DEPTH, index)?;
-
-        let leaf_hash = match self.leaves.get_mut(&index) {
-            // Leaf for this key already exists; update it and return its hash.
-            // If the leaf was LeafSingle, it gets promoted to LeafMultiple.
-            Some(leaf) => {
-                leaf.insert(key, value).map_err(to_merkle_error)?;
-                leaf.hash()
-            },
-            // No leaf for this key exists; create a new one and return its hash.
-            None => {
-                let leaf = SmtLeaf::new_single(key, value);
-                let leaf_hash = leaf.hash();
-                self.leaves.insert(index, leaf);
-                leaf_hash
-            },
-        };
-
-        let new_root = self.store.set_node(root, node_index, leaf_hash)?.root;
-        self.roots.insert(new_root);
-
-        Ok(new_root)
+        self.batch_insert(root, vec![(key, value)])
     }
 
     /// Inserts the specified key-value pairs into an SMT with the specified root. This would also
@@ -166,7 +139,7 @@ impl SmtForest {
     pub fn batch_insert(
         &mut self,
         root: Word,
-        entries: &Map<Word, Word>,
+        entries: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<Word, MerkleError> {
         if !self.roots.contains(&root) {
             return Err(MerkleError::RootNotInStore(root));
@@ -178,15 +151,15 @@ impl SmtForest {
             let index = key[3].as_int();
             if let Some(leaf) = new_leaves.get_mut(&index) {
                 // We've already mutated this leaf, add the new key-value pair to it
-                leaf.insert(*key, *value).map_err(to_merkle_error)?;
+                leaf.insert(key, value).map_err(to_merkle_error)?;
             } else if let Some(leaf) = self.leaves.get(&index) {
                 // Create a mutation of an existing leaf
                 let mut new_leaf = leaf.clone();
-                new_leaf.insert(*key, *value).map_err(to_merkle_error)?;
+                new_leaf.insert(key, value).map_err(to_merkle_error)?;
                 new_leaves.insert(index, new_leaf);
             } else {
                 // Create a new leaf for a new key-value pair
-                let new_leaf = SmtLeaf::new_single(*key, *value);
+                let new_leaf = SmtLeaf::new_single(key, value);
                 new_leaves.insert(index, new_leaf);
             }
         }

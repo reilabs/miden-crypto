@@ -153,32 +153,10 @@ impl MerkleStore {
     /// - `NodeNotInStore` if a node needed to traverse from `root` to `index` is not present in the
     ///   store.
     pub fn get_path(&self, root: Word, index: NodeIndex) -> Result<MerkleProof, MerkleError> {
-        let mut hash = root;
-        let mut path = Vec::with_capacity(index.depth().into());
-
-        // corner case: check the root is in the store when called with index `NodeIndex::root()`
-        self.nodes.get(&hash).ok_or(MerkleError::RootNotInStore(hash))?;
-
-        for i in (0..index.depth()).rev() {
-            let node = self
-                .nodes
-                .get(&hash)
-                .ok_or(MerkleError::NodeIndexNotFoundInStore(hash, index))?;
-
-            let bit = (index.value() >> i) & 1;
-            hash = if bit == 0 {
-                path.push(node.right);
-                node.left
-            } else {
-                path.push(node.left);
-                node.right
-            }
-        }
-
-        // the path is computed from root to leaf, so it must be reversed
-        path.reverse();
-
-        Ok(MerkleProof::new(hash, MerklePath::new(path)))
+        let (value, path) = self.get_indexed_path(root, index)?;
+        let path = path.into_values().rev().collect::<Vec<_>>();
+        
+        Ok(MerkleProof::new(value, MerklePath::new(path)))
     }
 
     /// Returns the node at the specified `index` and its opening to the `root`.
