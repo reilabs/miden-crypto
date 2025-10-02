@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, collections::BTreeSet};
+use alloc::{collections::BTreeMap, collections::BTreeSet, vec::Vec};
 
 use super::{EmptySubtreeRoots, MerkleError, MerkleStore, NodeIndex, SmtLeaf, SmtProof, Word};
 use crate::{
@@ -175,6 +175,7 @@ impl SmtForest {
         }
 
         // calculate new key-value pairs for the leaves
+        // TODO: add error handling
         let mut new_leaves = BTreeMap::<u64, SmtLeaf>::new();
         for (key, value) in entries {
             let index = key[3].as_int();
@@ -189,21 +190,12 @@ impl SmtForest {
                 new_leaves.insert(index, new_leaf);
             }
         }
+        let new_leaves = new_leaves.iter().map(|(index, leaf)| {
+            (NodeIndex::new(SMT_DEPTH, *index).unwrap(), leaf.hash())
+        }).collect::<Vec<_>>();
 
         std::println!("new leaves {new_leaves:?}");
 
-        let mut nodes_for_update = Map::<NodeIndex, Word>::new();
-        for (index, leaf) in new_leaves.iter() {
-            let entry_node_index = NodeIndex::new(SMT_DEPTH, *index)?;
-
-            // Store Merkle proof nodes, so we can use them to calculate updated values
-            let path_nodes = self.store.get_path_nodes(root, entry_node_index)?;
-            nodes_for_update.extend(path_nodes);
-
-            // Merkle proof nodes can be also the one we're inserting, so update their values
-            nodes_for_update.insert(entry_node_index, leaf.hash());
-        }
-        
-        self.store.update_nodes(root, &nodes_for_update)
+        self.store.set_nodes(root, new_leaves)
     }
 }

@@ -181,7 +181,7 @@ impl MerkleStore {
     }
 
     // TODO comment
-    pub fn get_path_nodes(&self, root: Word, index: NodeIndex) -> Result<Map::<NodeIndex, Word>, MerkleError> {
+    fn get_path_nodes(&self, root: Word, index: NodeIndex) -> Result<Map::<NodeIndex, Word>, MerkleError> {
         let mut hash = root;
         let mut path = Map::<NodeIndex, Word>::new();
 
@@ -212,27 +212,28 @@ impl MerkleStore {
 
     // TODO comment
     // TODO this should be in a different section since it mutates the store
-    pub fn update_nodes(
+    pub fn set_nodes(
         &mut self,
         root: Word,
-        entries: &Map<NodeIndex, Word>,
+        entries: impl IntoIterator<Item = (NodeIndex, Word)>,
     ) -> Result<Word, MerkleError> {
-        let mut nodes_for_update = entries.clone();
-
-        for (index, _) in nodes_for_update.iter() {
-            if index.depth() >= 60 {
-                std::println!("Available node: {:?}", index);
-            }
-        }
-
         let mut last = NodeIndex::root();
         let mut queue: VecDeque<NodeIndex> = VecDeque::new();
-        for (index, _) in entries.into_iter().rev() {
-            if index.depth() < SMT_DEPTH {
-                break;
+        let mut nodes_for_update = Map::<NodeIndex, Word>::new();
+        for (index, leaf) in entries {
+            // Store Merkle proof nodes, so we can use them to calculate updated values
+            let path_nodes = self.get_path_nodes(root, index)?;
+            nodes_for_update.extend(path_nodes);
+
+            // Merkle proof nodes can be also the one we're inserting, so update their values
+            nodes_for_update.insert(index, leaf);
+
+            self.nodes.insert(leaf, StoreNode { left: Word::empty(), right: Word::empty() });
+            let parent = index.parent();
+            if parent != last {
+                queue.push_back(parent.clone());
             }
-            queue.push_back(index.clone());
-            last = index.clone();
+            last = parent;
         }
 
         while let Some(index) = queue.pop_front() {
@@ -243,20 +244,15 @@ impl MerkleStore {
             }
             last = parent;
 
-            if index.depth() == SMT_DEPTH {
-                let value = nodes_for_update.get(&index).ok_or(MerkleError::NodeIndexNotFoundInStore(root, index))?;
-                self.nodes.insert(*value, StoreNode { left: Word::empty(), right: Word::empty() });
-            } else {
-                let left_index = index.left_child();
-                let right_index = index.right_child();
-                std::println!("Left child: {:?}", left_index);
-                std::println!("Right child: {:?}", right_index);    
-                let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
-                let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
-                let new_value = Rpo256::merge(&[*left_value, *right_value]);
-                self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
-                nodes_for_update.insert(index, new_value);
-            }
+            let left_index = index.left_child();
+            let right_index = index.right_child();
+            std::println!("Left child: {:?}", left_index);
+            std::println!("Right child: {:?}", right_index);    
+            let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
+            let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
+            let new_value = Rpo256::merge(&[*left_value, *right_value]);
+            self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
+            nodes_for_update.insert(index, new_value);
         }
 
         Ok(nodes_for_update.get(&NodeIndex::root()).ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?.clone())
