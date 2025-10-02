@@ -138,18 +138,10 @@ impl SmtForest {
         let leaf_hash = match self.leaves.get_mut(&index) {
             // Leaf for this key already exists; update it and return its hash.
             // If the leaf was LeafSingle, it gets promoted to LeafMultiple.
-            Some(leaf) => match leaf.insert(key, value) {
-                Ok(_) => leaf.hash(),
-                Err(err) => match err {
-                    SmtLeafError::TooManyLeafEntries { actual } => {
-                        return Err(MerkleError::TooManyEntries(actual));
-                    },
-                    _ => {
-                        unreachable!("other SmtLeafError variants should not be possible here");
-                    },
-                },
+            Some(leaf) => {
+                leaf.insert(key, value).map_err(to_merkle_error)?;
+                leaf.hash()
             },
-
             // No leaf for this key exists; create a new one and return its hash.
             None => {
                 let leaf = SmtLeaf::new_single(key, value);
@@ -181,15 +173,14 @@ impl SmtForest {
         }
 
         // calculate new key-value pairs for the leaves
-        // TODO: add error handling
         let mut new_leaves = BTreeMap::<u64, SmtLeaf>::new();
         for (key, value) in entries {
             let index = key[3].as_int();
             if let Some(leaf) = new_leaves.get_mut(&index) {
-                leaf.insert(*key, *value).unwrap();
+                leaf.insert(*key, *value).map_err(to_merkle_error)?;
             } else if let Some(leaf) = self.leaves.get(&index) {
                 let mut new_leaf = leaf.clone();
-                new_leaf.insert(*key, *value).unwrap();
+                new_leaf.insert(*key, *value).map_err(to_merkle_error)?;
                 new_leaves.insert(index, new_leaf);
             } else {
                 let new_leaf = SmtLeaf::new_single(*key, *value);
@@ -204,5 +195,12 @@ impl SmtForest {
         std::println!("new leaves {new_leaves:?}");
 
         self.store.set_nodes(root, new_leaves)
+    }
+}
+
+fn to_merkle_error(err: SmtLeafError) -> MerkleError {
+    match err {
+        SmtLeafError::TooManyLeafEntries { actual } => MerkleError::TooManyLeafEntries { actual },
+        _ => unreachable!("other SmtLeafError variants should not be possible here"),
     }
 }
