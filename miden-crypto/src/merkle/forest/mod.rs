@@ -58,7 +58,7 @@ pub struct SmtForest {
     store: MerkleStore,
 
     /// Leaves of all SMTs stored in this forest
-    leaves: BTreeMap<Word, SmtLeaf>,
+    leaves: BTreeMap<u64, SmtLeaf>,
 }
 
 impl Default for SmtForest {
@@ -77,7 +77,7 @@ impl SmtForest {
         let mut roots = BTreeSet::new();
         let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
         roots.insert(empty_tree_root);
-        let leaves: BTreeMap<Word, SmtLeaf> = BTreeMap::new();
+        let leaves: BTreeMap<u64, SmtLeaf> = BTreeMap::new();
         SmtForest { store, roots, leaves }
     }
 
@@ -97,7 +97,7 @@ impl SmtForest {
         let node_index = NodeIndex::new(SMT_DEPTH, index)?;
         let path: SparseMerklePath = self.store.get_path(root, node_index)?.path.try_into()?;
 
-        let leaf = match self.leaves.get(&key) {
+        let leaf = match self.leaves.get(&index) {
             Some(leaf) => leaf.clone(),
             None => return Err(MerkleError::UntrackedKey(key)),
         };
@@ -130,7 +130,7 @@ impl SmtForest {
         let node_index = NodeIndex::new(SMT_DEPTH, index)?;
         let path = self.store.get_path(root, node_index)?.path;
 
-        let leaf_hash = match self.leaves.get_mut(&key) {
+        let leaf_hash = match self.leaves.get_mut(&index) {
             // Leaf for this key already exists; update it and return its hash.
             // If the leaf was LeafSingle, it gets promoted to LeafMultiple.
             Some(leaf) => match leaf.insert(key, value) {
@@ -149,7 +149,7 @@ impl SmtForest {
             None => {
                 let leaf = SmtLeaf::new_single(key, value);
                 let leaf_hash = leaf.hash().clone();
-                self.leaves.insert(key, leaf);
+                self.leaves.insert(index, leaf);
                 leaf_hash
             },
         };
