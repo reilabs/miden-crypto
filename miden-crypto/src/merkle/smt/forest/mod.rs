@@ -192,9 +192,7 @@ impl SmtForest {
             .map(|(index, leaf)| (NodeIndex::new_unchecked(SMT_DEPTH, *index), leaf.hash()))
             .collect::<Vec<_>>();
 
-        std::println!("new leaves {new_leaves:?}");
-
-        let new_root =self.store.set_nodes(root, new_leaf_entries)?;
+        let new_root = self.store.set_nodes(root, new_leaf_entries)?;
         self.leaves.extend(new_leaves);
         self.roots.insert(new_root);
 
