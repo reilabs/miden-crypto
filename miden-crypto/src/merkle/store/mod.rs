@@ -1,4 +1,4 @@
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{collections::BTreeSet, vec::Vec};
 use core::borrow::Borrow;
 
 use super::{
@@ -495,59 +495,63 @@ impl MerkleStore {
         root: Word,
         entries: impl IntoIterator<Item = (NodeIndex, Word)>,
     ) -> Result<Word, MerkleError> {
-        let mut last = NodeIndex::root();
-        let mut queue: VecDeque<NodeIndex> = VecDeque::new();
+        // Collect path nodes and updated leaves
         let mut nodes_for_update = Map::<NodeIndex, Word>::new();
-        for (index, leaf) in entries {
-            // Store Merkle proof nodes, so we can use them to calculate updated values
+        let mut updated_indices: Vec<NodeIndex> = Vec::new();
+        for (index, leaf_hash) in entries {
+            // Record all sibling nodes along the path from root to this index
             let path_nodes = self.get_indexed_path(root, index)?;
             nodes_for_update.extend(path_nodes);
 
-            // Merkle proof nodes can be also the one we're inserting, so update their values
-            nodes_for_update.insert(index, leaf);
+            // Record the updated leaf value at this index
+            nodes_for_update.insert(index, leaf_hash);
 
+            // Ensure leaf hash exists in the store (as a leaf with empty children)
             self.nodes.insert(
-                leaf,
-                StoreNode {
-                    left: Word::empty(),
-                    right: Word::empty(),
-                },
+                leaf_hash,
+                StoreNode { left: Word::empty(), right: Word::empty() },
             );
-            let parent = index.parent();
-            if parent != last {
-                queue.push_back(parent.clone());
-            }
-            last = parent;
+
+            updated_indices.push(index);
         }
 
-        while let Some(index) = queue.pop_front() {
-            std::println!("Visiting: {:?}", index);
-            let parent = index.parent();
-            if parent != last {
-                queue.push_back(parent.clone());
+        // Gather all ancestors up to the root (deduplicated)
+        let mut ancestors: BTreeSet<NodeIndex> = BTreeSet::new();
+        for mut idx in updated_indices.into_iter().map(|i| i.parent()) {
+            loop {
+                ancestors.insert(idx);
+                if idx.is_root() {
+                    break;
+                }
+                idx = idx.parent();
             }
-            last = parent;
+        }
 
+        // Process ancestors deepest-first so children are available when computing parents
+        // BTreeSet iterates in ascending order; we want descending by depth
+        let mut ancestors_by_depth: Vec<NodeIndex> = ancestors.into_iter().collect();
+        ancestors_by_depth.sort_unstable_by_key(|i| core::cmp::Reverse(i.depth()));
+
+        for index in ancestors_by_depth {
             let left_index = index.left_child();
             let right_index = index.right_child();
-            std::println!("Left child: {:?}", left_index);
-            std::println!("Right child: {:?}", right_index);
-            let left_value = nodes_for_update
+
+            let left_value = *nodes_for_update
                 .get(&left_index)
                 .ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
-            let right_value = nodes_for_update
+            let right_value = *nodes_for_update
                 .get(&right_index)
                 .ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
-            let new_value = Rpo256::merge(&[*left_value, *right_value]);
-            self.nodes
-                .insert(new_value, StoreNode { left: *left_value, right: *right_value });
+
+            let new_value = Rpo256::merge(&[left_value, right_value]);
+            self.nodes.insert(new_value, StoreNode { left: left_value, right: right_value });
             nodes_for_update.insert(index, new_value);
         }
 
-        Ok(nodes_for_update
+        nodes_for_update
             .get(&NodeIndex::root())
-            .ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?
-            .clone())
+            .cloned()
+            .ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))
     }
 
     /// Merges two elements and adds the resulting node into the store.
