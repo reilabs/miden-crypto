@@ -1,9 +1,12 @@
-use alloc::{collections::BTreeMap, collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
-use super::{EmptySubtreeRoots, MerkleError, MerkleStore, NodeIndex, SmtLeaf, SmtProof, Word};
+use super::{EmptySubtreeRoots, MerkleError, NodeIndex, SmtLeaf, SmtProof, Word};
 use crate::{
     Map,
-    merkle::{SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH},
+    merkle::{MerkleStore, SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH},
 };
 
 #[cfg(test)]
@@ -23,8 +26,11 @@ mod tests;
 /// ```rust
 /// use miden_crypto::{
 ///     Felt, Map, ONE, WORD_SIZE, ZERO,
-///     merkle::{smt::{SMT_DEPTH, MAX_LEAF_ENTRIES}, int_to_node},
-///     merkle::forest::{SmtForest, EmptySubtreeRoots, Word},
+///     merkle::{
+///         forest::{EmptySubtreeRoots, SmtForest, Word},
+///         int_to_node,
+///         smt::{MAX_LEAF_ENTRIES, SMT_DEPTH},
+///     },
 /// };
 /// // // Create a new SMT forest
 /// let mut forest = SmtForest::new();
@@ -190,9 +196,10 @@ impl SmtForest {
                 new_leaves.insert(index, new_leaf);
             }
         }
-        let new_leaves = new_leaves.iter().map(|(index, leaf)| {
-            (NodeIndex::new(SMT_DEPTH, *index).unwrap(), leaf.hash())
-        }).collect::<Vec<_>>();
+        let new_leaves = new_leaves
+            .iter()
+            .map(|(index, leaf)| (NodeIndex::new(SMT_DEPTH, *index).unwrap(), leaf.hash()))
+            .collect::<Vec<_>>();
 
         std::println!("new leaves {new_leaves:?}");
 

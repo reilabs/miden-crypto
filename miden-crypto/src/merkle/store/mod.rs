@@ -1,5 +1,4 @@
-use alloc::vec::{Vec};
-use alloc::collections::VecDeque;
+use alloc::{collections::VecDeque, vec::Vec};
 use core::borrow::Borrow;
 
 use super::{
@@ -7,7 +6,8 @@ use super::{
     PartialMerkleTree, RootPath, Rpo256, SimpleSmt, Smt, Word, mmr::Mmr,
 };
 use crate::{
-    merkle::SMT_DEPTH, utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}, Map
+    Map,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 #[cfg(test)]
@@ -181,7 +181,11 @@ impl MerkleStore {
     }
 
     // TODO comment
-    fn get_path_nodes(&self, root: Word, index: NodeIndex) -> Result<Map::<NodeIndex, Word>, MerkleError> {
+    fn get_path_nodes(
+        &self,
+        root: Word,
+        index: NodeIndex,
+    ) -> Result<Map<NodeIndex, Word>, MerkleError> {
         let mut hash = root;
         let mut path = Map::<NodeIndex, Word>::new();
 
@@ -228,7 +232,13 @@ impl MerkleStore {
             // Merkle proof nodes can be also the one we're inserting, so update their values
             nodes_for_update.insert(index, leaf);
 
-            self.nodes.insert(leaf, StoreNode { left: Word::empty(), right: Word::empty() });
+            self.nodes.insert(
+                leaf,
+                StoreNode {
+                    left: Word::empty(),
+                    right: Word::empty(),
+                },
+            );
             let parent = index.parent();
             if parent != last {
                 queue.push_back(parent.clone());
@@ -247,17 +257,24 @@ impl MerkleStore {
             let left_index = index.left_child();
             let right_index = index.right_child();
             std::println!("Left child: {:?}", left_index);
-            std::println!("Right child: {:?}", right_index);    
-            let left_value = nodes_for_update.get(&left_index).ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
-            let right_value = nodes_for_update.get(&right_index).ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
+            std::println!("Right child: {:?}", right_index);
+            let left_value = nodes_for_update
+                .get(&left_index)
+                .ok_or(MerkleError::NodeIndexNotFoundInTree(left_index))?;
+            let right_value = nodes_for_update
+                .get(&right_index)
+                .ok_or(MerkleError::NodeIndexNotFoundInTree(right_index))?;
             let new_value = Rpo256::merge(&[*left_value, *right_value]);
-            self.nodes.insert(new_value, StoreNode { left: *left_value, right: *right_value });
+            self.nodes
+                .insert(new_value, StoreNode { left: *left_value, right: *right_value });
             nodes_for_update.insert(index, new_value);
         }
 
-        Ok(nodes_for_update.get(&NodeIndex::root()).ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?.clone())
+        Ok(nodes_for_update
+            .get(&NodeIndex::root())
+            .ok_or(MerkleError::NodeIndexNotFoundInStore(root, NodeIndex::root()))?
+            .clone())
     }
-
 
     // LEAF TRAVERSAL
     // --------------------------------------------------------------------------------------------
