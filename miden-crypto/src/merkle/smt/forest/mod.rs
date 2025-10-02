@@ -145,7 +145,7 @@ impl SmtForest {
             // No leaf for this key exists; create a new one and return its hash.
             None => {
                 let leaf = SmtLeaf::new_single(key, value);
-                let leaf_hash = leaf.hash().clone();
+                let leaf_hash = leaf.hash();
                 self.leaves.insert(index, leaf);
                 leaf_hash
             },
