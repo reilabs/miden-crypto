@@ -96,7 +96,7 @@ fn test_batch_insert() -> Result<(), MerkleError> {
         (Word::new([ZERO, ONE, ZERO, ONE]), Word::new([ONE; WORD_SIZE])),
     ];
 
-    let new_root = forest.batch_insert(empty_tree_root, values)?;
+    let new_root = forest.batch_insert(empty_tree_root, values.into_iter())?;
     assert_eq!(
         new_root,
         Word::new([

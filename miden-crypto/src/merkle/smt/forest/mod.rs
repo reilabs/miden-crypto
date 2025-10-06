@@ -4,7 +4,9 @@ use alloc::{
 };
 
 use super::{EmptySubtreeRoots, MerkleError, NodeIndex, SmtLeaf, SmtProof, Word};
-use crate::merkle::{MerkleStore, SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH};
+use crate::merkle::{
+    LeafIndex, MerkleStore, SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH,
+};
 
 #[cfg(test)]
 mod tests;
@@ -61,7 +63,7 @@ pub struct SmtForest {
     store: MerkleStore,
 
     /// Leaves of all SMTs stored in this forest
-    leaves: BTreeMap<u64, SmtLeaf>,
+    leaves: BTreeMap<Word, SmtLeaf>,
 }
 
 impl Default for SmtForest {
@@ -76,12 +78,15 @@ impl SmtForest {
 
     /// Creates an empty `SmtForest` instance.
     pub fn new() -> SmtForest {
-        let store = MerkleStore::new();
-        let mut roots = BTreeSet::new();
         let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
+
+        let mut roots = BTreeSet::new();
         roots.insert(empty_tree_root);
-        let leaves: BTreeMap<u64, SmtLeaf> = BTreeMap::new();
-        SmtForest { store, roots, leaves }
+
+        let store = MerkleStore::new();
+        let leaves = BTreeMap::new();
+
+        SmtForest { roots, store, leaves }
     }
 
     // DATA EXTRACTORS
@@ -96,22 +101,19 @@ impl SmtForest {
             return Err(MerkleError::RootNotInStore(root));
         }
 
-        let index = key[3].as_int();
-        let node_index = NodeIndex::new(SMT_DEPTH, index)?;
-        let path: SparseMerklePath = self.store.get_path(root, node_index)?.path.try_into()?;
+        let leaf_index = NodeIndex::new(SMT_DEPTH, key[3].as_int())?;
 
-        let leaf = match self.leaves.get(&index) {
+        let proof = self.store.get_path(root, leaf_index)?;
+        let path = proof.path.try_into()?;
+        let leaf = proof.value;
+
+        let leaf = match self.leaves.get(&leaf) {
             Some(leaf) => leaf.clone(),
             None => return Err(MerkleError::UntrackedKey(key)),
         };
 
-        Ok(match SmtProof::new(path, leaf) {
-            Ok(proof) => proof,
-            Err(err) => match err {
-                SmtProofError::InvalidMerklePathLength(depth) => {
-                    return Err(MerkleError::InvalidPathLength(depth));
-                },
-            },
+        SmtProof::new(path, leaf).map_err(|error| match error {
+            SmtProofError::InvalidMerklePathLength(depth) => MerkleError::InvalidPathLength(depth),
         })
     }
 
@@ -125,7 +127,7 @@ impl SmtForest {
     /// enough data in the forest to perform the insert, or if the insert would create a leaf
     /// with too many entries.
     pub fn insert(&mut self, root: Word, key: Word, value: Word) -> Result<Word, MerkleError> {
-        self.batch_insert(root, vec![(key, value)])
+        self.batch_insert(root, vec![(key, value)].into_iter())
     }
 
     /// Inserts the specified key-value pairs into an SMT with the specified root. This would also
@@ -137,37 +139,45 @@ impl SmtForest {
     pub fn batch_insert(
         &mut self,
         root: Word,
-        entries: impl IntoIterator<Item = (Word, Word)>,
+        entries: impl Iterator<Item = (Word, Word)> + Clone,
     ) -> Result<Word, MerkleError> {
         if !self.roots.contains(&root) {
             return Err(MerkleError::RootNotInStore(root));
         }
 
-        // Calculate new leaves for updated key-value pairs
-        let mut new_leaves = BTreeMap::<u64, SmtLeaf>::new();
+        // Find all affected leaf indices
+        let indices = entries.clone().map(|(key, _)| key[3].as_int()).collect::<BTreeSet<_>>();
+
+        // Create new SmtLeaf objects for updated key-value pairs
+        let mut new_leaves = BTreeMap::new();
+        for index in indices {
+            let node_index = NodeIndex::new_unchecked(SMT_DEPTH, index);
+            let leaf_hash = self.store.get_node(root, node_index)?;
+
+            let leaf = self.leaves.get(&leaf_hash).cloned().unwrap_or_else(|| {
+                let leaf_index = LeafIndex::new_max_depth(index);
+                SmtLeaf::new_empty(leaf_index)
+            });
+
+            new_leaves.insert(index, leaf);
+        }
         for (key, value) in entries {
             let index = key[3].as_int();
-            if let Some(leaf) = new_leaves.get_mut(&index) {
-                // We've already mutated this leaf, add the new key-value pair to it
-                leaf.insert(key, value).map_err(to_merkle_error)?;
-            } else if let Some(leaf) = self.leaves.get(&index) {
-                // Create a mutation of an existing leaf
-                let mut new_leaf = leaf.clone();
-                new_leaf.insert(key, value).map_err(to_merkle_error)?;
-                new_leaves.insert(index, new_leaf);
-            } else {
-                // Create a new leaf for a new key-value pair
-                let new_leaf = SmtLeaf::new_single(key, value);
-                new_leaves.insert(index, new_leaf);
-            }
+            let leaf = new_leaves.get_mut(&index).unwrap();
+            leaf.insert(key, value).map_err(to_merkle_error)?;
         }
+
+        // Update MerkleStore with new leaf hashes
         let new_leaf_entries = new_leaves
             .iter()
             .map(|(index, leaf)| (NodeIndex::new_unchecked(SMT_DEPTH, *index), leaf.hash()))
             .collect::<Vec<_>>();
-
         let new_root = self.store.set_nodes(root, new_leaf_entries)?;
-        self.leaves.extend(new_leaves);
+
+        // Update successful, insert new leaves into the forest
+        for leaf in new_leaves.into_values() {
+            self.leaves.insert(leaf.hash(), leaf);
+        }
         self.roots.insert(new_root);
 
         Ok(new_root)
