@@ -5,7 +5,7 @@ use alloc::{
 
 use super::{EmptySubtreeRoots, MerkleError, NodeIndex, SmtLeaf, SmtProof, Word};
 use crate::merkle::{
-    LeafIndex, MerkleStore, SmtLeafError, SmtProofError, SparseMerklePath, smt::SMT_DEPTH,
+    LeafIndex, MerkleStore, SmtLeafError, SmtProofError, smt::SMT_DEPTH,
 };
 
 #[cfg(test)]

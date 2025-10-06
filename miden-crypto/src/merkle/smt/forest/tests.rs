@@ -157,3 +157,53 @@ fn test_open_root_in_store() -> Result<(), MerkleError> {
 
     Ok(())
 }
+
+#[test]
+fn test_multiple_versions_of_same_key() -> Result<(), MerkleError> {
+    // This test verifies that when we insert multiple values for the same key,
+    // we can still open valid proofs for all historical roots.
+    // Before the fix, only the proof for the latest root would be correct because
+    // we stored leaves by index (key[3]) rather than by leaf hash.
+    let mut forest = SmtForest::new();
+
+    let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
+    let key = Word::new([ZERO; WORD_SIZE]);
+
+    // Insert the same key with different values, creating multiple roots
+    let value1 = Word::new([ONE; WORD_SIZE]);
+    let root1 = forest.insert(empty_tree_root, key, value1)?;
+
+    let value2 = Word::new([Felt::new(2); WORD_SIZE]);
+    let root2 = forest.insert(root1, key, value2)?;
+
+    let value3 = Word::new([Felt::new(3); WORD_SIZE]);
+    let root3 = forest.insert(root2, key, value3)?;
+
+    // All three roots should be different
+    assert_ne!(root1, root2);
+    assert_ne!(root2, root3);
+    assert_ne!(root1, root3);
+
+    // Now open proofs for each historical root and verify them
+    // Before the fix, only the proof for root3 would work because the forest
+    // only stored the latest leaf (the one containing value3)
+    let proof1 = forest.open(root1, key)?;
+    assert!(
+        proof1.verify_membership(&key, &value1, &root1),
+        "Proof for root1 should verify with value1"
+    );
+
+    let proof2 = forest.open(root2, key)?;
+    assert!(
+        proof2.verify_membership(&key, &value2, &root2),
+        "Proof for root2 should verify with value2"
+    );
+
+    let proof3 = forest.open(root3, key)?;
+    assert!(
+        proof3.verify_membership(&key, &value3, &root3),
+        "Proof for root3 should verify with value3"
+    );
+
+    Ok(())
+}
