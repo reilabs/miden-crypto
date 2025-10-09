@@ -249,6 +249,57 @@ fn test_single_entry_smt() {
 }
 
 #[test]
+fn test_insert_batch() {
+    let storage1 = MemoryStorage::new();
+    let storage2 = MemoryStorage::new();
+
+    let key1 = crate::Word::new([ONE, ONE, ONE, ONE]);
+    let value1 = crate::Word::new([ONE; WORD_SIZE]);
+    let key2 = crate::Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
+    let value2 = crate::Word::new([2_u32.into(); WORD_SIZE]);
+    let key3 = crate::Word::from([3_u32, 3_u32, 3_u32, 3_u32]);
+    let value3 = crate::Word::new([3_u32.into(); WORD_SIZE]);
+
+    let entries = vec![(key1, value1), (key2, value2), (key3, value3)];
+
+    // Two-step flow
+    let mut smt1 = LargeSmt::<_>::new(storage1).unwrap();
+    let mutations = smt1.compute_mutations(entries.clone()).unwrap();
+    let root1 = mutations.root();
+    smt1.apply_mutations(mutations).unwrap();
+
+    // Single-call insert_batch
+    let mut smt2 = LargeSmt::<_>::new(storage2).unwrap();
+    let root2 = smt2.insert_batch(entries).unwrap();
+
+    // Verify both methods produce the same root
+    assert_eq!(
+        root1, root2,
+        "insert_batch should produce same root as compute/apply combination"
+    );
+    assert_eq!(smt1.root().unwrap(), smt2.root().unwrap(), "Final roots should match");
+
+    // Verify both have the same values
+    assert_eq!(smt1.get_value(&key1), smt2.get_value(&key1));
+    assert_eq!(smt1.get_value(&key2), smt2.get_value(&key2));
+    assert_eq!(smt1.get_value(&key3), smt2.get_value(&key3));
+
+    // Test insert_batch with updates and deletions
+    let updates = vec![
+        // update
+        (key1, crate::Word::new([5_u32.into(); WORD_SIZE])),
+        // delete
+        (key2, EMPTY_WORD),
+    ];
+
+    let _root3 = smt2.insert_batch(updates).unwrap();
+
+    assert_eq!(smt2.get_value(&key1), crate::Word::new([5_u32.into(); WORD_SIZE]));
+    assert_eq!(smt2.get_value(&key2), EMPTY_WORD);
+    assert_eq!(smt2.get_value(&key3), value3);
+}
+
+#[test]
 fn test_duplicate_key_insertion() {
     let storage = MemoryStorage::new();
     let key = crate::Word::from([ONE, ONE, ONE, ONE]);

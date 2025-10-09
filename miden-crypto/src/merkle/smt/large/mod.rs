@@ -20,7 +20,7 @@
 //! # }
 //! ```
 //!
-//! Initialize an empty RocksDB-backed tree and bulk-load entries using mutations:
+//! Initialize an empty RocksDB-backed tree and bulk-load entries:
 //! ```no_run
 //! use miden_crypto::{
 //!     Felt, Word,
@@ -49,14 +49,13 @@
 //!     ),
 //! ];
 //!
-//! // Compute and atomically apply the initial bulk load
-//! let mutations = smt.compute_mutations(entries)?;
-//! smt.apply_mutations(mutations)?;
+//! // Single-call batch insertion (recommended for most use cases)
+//! smt.insert_batch(entries)?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! Compute and apply a batch of updates atomically:
+//! Compute and apply a batch of updates (including deletions):
 //! ```no_run
 //! use miden_crypto::{
 //!     EMPTY_WORD, Felt, Word,
@@ -75,8 +74,30 @@
 //!
 //! // EMPTY_WORD marks deletions.
 //! let updates = vec![(k1, v1), (k2, EMPTY_WORD), (k3, v3)];
+//! smt.insert_batch(updates)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! For advanced use cases where you need to inspect mutations before applying them,
+//! use the two-step flow:
+//! ```no_run
+//! # use miden_crypto::{Felt, Word, merkle::{LargeSmt, RocksDbConfig, RocksDbStorage}};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
+//! # let mut smt = LargeSmt::new(storage)?;
+//! # let updates = vec![];
+//! // Compute mutations
 //! let mutations = smt.compute_mutations(updates)?;
-//! smt.apply_mutations(mutations)?;
+//!
+//! // Inspect the new root before applying
+//! let new_root = mutations.root();
+//! println!("New root will be: {:?}", new_root);
+//!
+//! // Apply or discard based on some condition
+//! if some_validation(new_root) {
+//!     smt.apply_mutations(mutations)?;
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -466,85 +487,88 @@ impl<S: SmtStorage> LargeSmt<S> {
         let leaves_from_storage =
             self.storage.get_leaves(&leaf_indices).expect("Failed to get leaves");
 
-        // Map leaf indices to their corresponding leaves
-        let leaf_map: Map<u64, SmtLeaf> = leaf_indices
-            .into_iter()
-            .zip(leaves_from_storage)
-            .filter_map(|(index, maybe_leaf)| maybe_leaf.map(|leaf| (index, leaf)))
-            .collect();
+        let (mutation_set, _subtree_cache, _leaf_map) = self
+            .compute_mutations_with_preloaded_leaves(
+                sorted_kv_pairs,
+                leaf_indices,
+                leaves_from_storage,
+            )?;
 
-        // Convert sorted pairs into mutated leaves and capture any new pairs
-        let (mut leaves, new_pairs) =
-            self.sorted_pairs_to_mutated_leaves_with_preloaded_leaves(sorted_kv_pairs, leaf_map);
-
-        // If no mutations, return an empty mutation set
-        let old_root = self.root()?;
-        if leaves.is_empty() {
-            return Ok(MutationSet {
-                old_root,
-                new_root: old_root,
-                node_mutations: NodeMutations::default(),
-                new_pairs,
-            });
-        }
-
-        let mut node_mutations = NodeMutations::default();
-
-        // Process each depth level in reverse, stepping by the subtree depth
-        for subtree_root_depth in
-            (0..=SMT_DEPTH - SUBTREE_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
-        {
-            // Parallel processing of each subtree to generate mutations and roots
-            let (mutations_per_subtree, mut subtree_roots): (Vec<_>, Vec<_>) = leaves
-                .into_par_iter()
-                .map(|subtree_leaves| {
-                    let subtree: Option<Subtree> = if subtree_root_depth < IN_MEMORY_DEPTH {
-                        None
-                    } else {
-                        // Compute subtree root index
-                        let subtree_root_index = NodeIndex::new_unchecked(
-                            subtree_root_depth,
-                            subtree_leaves[0].col >> SUBTREE_DEPTH,
-                        );
-                        self.storage
-                            .get_subtree(subtree_root_index)
-                            .expect("Storage error getting subtree in compute_mutations")
-                    };
-                    debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
-                    self.build_subtree_mutations(
-                        subtree_leaves,
-                        SMT_DEPTH,
-                        subtree_root_depth,
-                        subtree,
-                    )
-                })
-                .unzip();
-
-            // Prepare leaves for the next depth level
-            leaves = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
-
-            // Aggregate all node mutations
-            node_mutations.extend(mutations_per_subtree.into_iter().flatten());
-
-            debug_assert!(!leaves.is_empty());
-        }
-
-        let new_root = leaves[0][0].hash;
-
-        // Create mutation set
-        let mutation_set = MutationSet {
-            old_root: self.root()?,
-            new_root,
-            node_mutations,
-            new_pairs,
-        };
-
-        // There should be mutations and new pairs at this point
+        // There should be mutations and new pairs at this point if leaves were changed
         debug_assert!(
-            !mutation_set.node_mutations().is_empty() && !mutation_set.new_pairs().is_empty()
+            mutation_set.node_mutations().is_empty() == mutation_set.new_pairs().is_empty()
         );
 
         Ok(mutation_set)
+    }
+
+    /// Inserts or updates multiple key-value pairs in a single optimized batch operation.
+    ///
+    /// Use this method when you don't need to inspect the [`MutationSet`] before applying changes.
+    /// For cases where you need to validate the new root or examine mutations before committing,
+    /// use the two-step flow instead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use miden_crypto::{Felt, Word, EMPTY_WORD, merkle::{LargeSmt, RocksDbConfig, RocksDbStorage}};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let storage = RocksDbStorage::open(RocksDbConfig::new("/tmp/test-db"))?;
+    /// # let mut smt = LargeSmt::new(storage)?;
+    /// let entries = vec![
+    ///     (
+    ///         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
+    ///         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+    ///     ),
+    ///     (
+    ///         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
+    ///         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+    ///     ),
+    /// ];
+    ///
+    /// // Single-call optimized batch insertion
+    /// let new_root = smt.insert_batch(entries)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an error if any of the insertions would exceed
+    /// [`MAX_LEAF_ENTRIES`](super::MAX_LEAF_ENTRIES) in a leaf, or if there are storage errors.
+    pub fn insert_batch(
+        &mut self,
+        kv_pairs: impl IntoIterator<Item = (Word, Word)>,
+    ) -> Result<Word, LargeSmtError>
+    where
+        Self: Sized + Sync,
+    {
+        // Collect and sort key-value pairs
+        let mut sorted_kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
+        sorted_kv_pairs.par_sort_unstable_by_key(|(key, _)| Self::key_to_leaf_index(key).value());
+
+        // Collect unique leaf indices
+        let mut leaf_indices: Vec<u64> = sorted_kv_pairs
+            .iter()
+            .map(|(key, _)| Self::key_to_leaf_index(key).value())
+            .collect();
+        leaf_indices.dedup();
+        leaf_indices.sort_unstable();
+
+        // Load leaves from storage
+        let leaves_from_storage = self.storage.get_leaves(&leaf_indices)?;
+
+        // Compute mutations using preloaded leaves
+        let (mutations, subtrees, leaf_map) = self.compute_mutations_with_preloaded_leaves(
+            sorted_kv_pairs,
+            leaf_indices,
+            leaves_from_storage,
+        )?;
+
+        let new_root = mutations.root();
+
+        // Apply mutations using the cached subtrees  prebuilt leaf map
+        self.apply_mutations_with_preloaded_leaves(mutations, leaf_map, subtrees)?;
+
+        Ok(new_root)
     }
 
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree.
@@ -558,85 +582,12 @@ impl<S: SmtStorage> LargeSmt<S> {
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
     ) -> Result<(), LargeSmtError> {
-        use NodeMutation::*;
         use rayon::prelude::*;
-        let MutationSet {
-            old_root,
-            node_mutations,
-            new_pairs,
-            new_root,
-        } = mutations;
 
-        // Guard against accidentally trying to apply mutations that were computed against a
-        // different tree, including a stale version of this tree.
-        let expected_root = self.root()?;
-        if old_root != expected_root {
-            return Err(LargeSmtError::Merkle(MerkleError::ConflictingRoots {
-                expected_root,
-                actual_root: old_root,
-            }));
-        }
-
-        // Sort mutations
-        let mut sorted_mutations: Vec<_> = Vec::from_iter(node_mutations);
-        sorted_mutations.par_sort_unstable_by_key(|(index, _)| Subtree::find_subtree_root(*index));
-
-        // Collect all unique subtree root indexes needed
-        let mut subtree_roots_indices: Vec<NodeIndex> = sorted_mutations
-            .iter()
-            .filter_map(|(index, _)| {
-                if index.depth() < IN_MEMORY_DEPTH {
-                    None
-                } else {
-                    Some(Subtree::find_subtree_root(*index))
-                }
-            })
-            .collect();
-        subtree_roots_indices.dedup();
-
-        // Read all subtrees at once
-        let subtrees_from_storage = self.storage.get_subtrees(&subtree_roots_indices)?;
-
-        // Map the subtrees
-        let mut loaded_subtrees: Map<NodeIndex, Option<Subtree>> = subtree_roots_indices
-            .into_iter()
-            .zip(subtrees_from_storage)
-            .map(|(root_index, subtree_opt)| {
-                (root_index, Some(subtree_opt.unwrap_or_else(|| Subtree::new(root_index))))
-            })
-            .collect();
-
-        // Process mutations
-        for (index, mutation) in sorted_mutations {
-            if index.depth() < IN_MEMORY_DEPTH {
-                match mutation {
-                    Removal => self.remove_inner_node(index),
-                    Addition(node) => self.insert_inner_node(index, node),
-                };
-            } else {
-                let subtree_root_index = Subtree::find_subtree_root(index);
-                let subtree = loaded_subtrees
-                    .get_mut(&subtree_root_index)
-                    .expect("Subtree map entry must exist")
-                    .as_mut()
-                    .expect("Subtree must exist as it was either fetched or created");
-
-                match mutation {
-                    Removal => subtree.remove_inner_node(index),
-                    Addition(node) => subtree.insert_inner_node(index, node),
-                };
-            }
-        }
-
-        // Go through subtrees, see if any are empty, and if so remove them
-        for (_index, subtree) in loaded_subtrees.iter_mut() {
-            if subtree.as_ref().is_some_and(|s| s.is_empty()) {
-                *subtree = None;
-            }
-        }
+        let new_pairs_ref = mutations.new_pairs();
 
         // Collect and sort key-value pairs by their corresponding leaf index
-        let mut sorted_kv_pairs: Vec<_> = new_pairs.iter().map(|(k, v)| (*k, *v)).collect();
+        let mut sorted_kv_pairs: Vec<_> = new_pairs_ref.iter().map(|(k, v)| (*k, *v)).collect();
         sorted_kv_pairs.par_sort_by_key(|(key, _)| Self::key_to_leaf_index(key).value());
 
         // Collect the unique leaf indices
@@ -650,62 +601,10 @@ impl<S: SmtStorage> LargeSmt<S> {
         // Get leaves from storage
         let leaves = self.storage.get_leaves(&leaf_indices)?;
 
-        // Map leaf indices to their corresponding leaves
-        let mut leaf_map: Map<u64, Option<SmtLeaf>> =
-            leaf_indices.into_iter().zip(leaves).collect();
+        // Build leaf map
+        let leaf_map: Map<u64, Option<SmtLeaf>> = leaf_indices.into_iter().zip(leaves).collect();
 
-        let mut leaf_count_delta = 0isize;
-        let mut entry_count_delta = 0isize;
-
-        for (key, value) in new_pairs {
-            let idx = Self::key_to_leaf_index(&key).value();
-            // Get leaf
-            let entry = leaf_map.entry(idx).or_insert(None);
-
-            // New values is empty, handle deletion
-            if value == Self::EMPTY_VALUE {
-                if let Some(leaf) = entry {
-                    // Leaf exists, handle deletion
-                    if leaf.remove(key).1 {
-                        // Key had previous value, decrement entry count
-                        entry_count_delta -= 1;
-                        if leaf.is_empty() {
-                            // Leaf is now empty, remove it and decrement leaf count
-                            *entry = None;
-                            leaf_count_delta -= 1;
-                        }
-                    }
-                }
-            } else {
-                // New value is not empty, handle update or create
-                match entry {
-                    Some(leaf) => {
-                        // Leaf exists, handle update
-                        if leaf.insert(key, value).expect("Failed to insert value").is_none() {
-                            // Key had no previous value, increment entry count
-                            entry_count_delta += 1;
-                        }
-                    },
-                    None => {
-                        // Leaf does not exist, create it
-                        *entry = Some(SmtLeaf::Single((key, value)));
-                        // Increment both entry and leaf count
-                        entry_count_delta += 1;
-                        leaf_count_delta += 1;
-                    },
-                }
-            }
-        }
-
-        let updates = StorageUpdates::from_parts(
-            leaf_map,
-            loaded_subtrees,
-            new_root,
-            leaf_count_delta,
-            entry_count_delta,
-        );
-        self.storage.apply(updates)?;
-        Ok(())
+        self.apply_mutations_with_preloaded_leaves(mutations, leaf_map, Map::new())
     }
 
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree
@@ -772,6 +671,301 @@ impl<S: SmtStorage> LargeSmt<S> {
 
     // HELPERS
     // --------------------------------------------------------------------------------------------
+
+    /// Computes mutations with optionally preloaded leaves.
+    /// Returns the mutation set, subtrees, and a leaf map
+    fn compute_mutations_with_preloaded_leaves(
+        &self,
+        sorted_kv_pairs: Vec<(Word, Word)>,
+        leaf_indices: Vec<u64>,
+        leaves_from_storage: Vec<Option<SmtLeaf>>,
+    ) -> Result<
+        (
+            MutationSet<SMT_DEPTH, Word, Word>,
+            Map<NodeIndex, Subtree>,
+            Map<u64, Option<SmtLeaf>>,
+        ),
+        LargeSmtError,
+    >
+    where
+        Self: Sized + Sync,
+    {
+        // Build leaf map
+        let mut leaf_map_for_apply: Map<u64, Option<SmtLeaf>> =
+            leaf_indices.into_iter().zip(leaves_from_storage).collect();
+
+        // Extract non-None leaves for mutation computation
+        let mut leaf_map: Map<u64, SmtLeaf> = Map::new();
+        let mut indices_with_leaves: Vec<u64> = Vec::new();
+
+        for (index, maybe_leaf) in &mut leaf_map_for_apply {
+            if let Some(leaf) = maybe_leaf.take() {
+                indices_with_leaves.push(*index);
+                leaf_map.insert(*index, leaf);
+            }
+        }
+
+        // Convert sorted pairs into mutated leaves and capture any new pairs
+        let (mut leaves, new_pairs) =
+            self.sorted_pairs_to_mutated_leaves_with_preloaded_leaves(sorted_kv_pairs, &leaf_map);
+
+        // Restore leaves back into leaf_map_for_apply
+        for index in indices_with_leaves {
+            if let Some(leaf) = leaf_map.remove(&index) {
+                leaf_map_for_apply.insert(index, Some(leaf));
+            }
+        }
+
+        // If no mutations, return an empty mutation set
+        let old_root = self.root()?;
+        if leaves.is_empty() {
+            return Ok((
+                MutationSet {
+                    old_root,
+                    new_root: old_root,
+                    node_mutations: NodeMutations::default(),
+                    new_pairs,
+                },
+                Map::new(), // Empty subtrees
+                leaf_map_for_apply,
+            ));
+        }
+
+        let mut node_mutations = NodeMutations::default();
+        let mut subtree_cache: Map<NodeIndex, Subtree> = Map::new();
+
+        // Process each depth level in reverse, stepping by the subtree depth
+        for subtree_root_depth in
+            (0..=SMT_DEPTH - SUBTREE_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
+        {
+            // Collect subtree indices needed at this depth for batch loading
+            let subtree_indices: Vec<NodeIndex> = leaves
+                .iter()
+                .filter_map(|subtree_leaves| {
+                    if subtree_root_depth >= IN_MEMORY_DEPTH {
+                        Some(NodeIndex::new_unchecked(
+                            subtree_root_depth,
+                            subtree_leaves[0].col >> SUBTREE_DEPTH,
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Batch load subtrees for this depth
+            let loaded_subtrees = if !subtree_indices.is_empty() {
+                self.storage.get_subtrees(&subtree_indices)?
+            } else {
+                Vec::new()
+            };
+
+            // Add loaded subtrees to cache
+            for (index, maybe_subtree) in subtree_indices.iter().zip(loaded_subtrees.iter()) {
+                if let Some(subtree) = maybe_subtree {
+                    subtree_cache.insert(*index, subtree.clone());
+                }
+            }
+
+            // Build map for parallel access
+            let subtree_map: Map<NodeIndex, Option<Subtree>> =
+                subtree_indices.into_iter().zip(loaded_subtrees).collect();
+
+            // Parallel processing of each subtree to generate mutations and roots
+            let (mutations_per_subtree, mut subtree_roots): (Vec<_>, Vec<_>) = leaves
+                .into_par_iter()
+                .map(|subtree_leaves| {
+                    let subtree: Option<Subtree> = if subtree_root_depth < IN_MEMORY_DEPTH {
+                        None
+                    } else {
+                        let subtree_root_index = NodeIndex::new_unchecked(
+                            subtree_root_depth,
+                            subtree_leaves[0].col >> SUBTREE_DEPTH,
+                        );
+                        subtree_map.get(&subtree_root_index).and_then(|s| s.clone())
+                    };
+                    debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
+                    self.build_subtree_mutations(
+                        subtree_leaves,
+                        SMT_DEPTH,
+                        subtree_root_depth,
+                        subtree,
+                    )
+                })
+                .unzip();
+
+            // Prepare leaves for the next depth level
+            leaves = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
+
+            // Aggregate all node mutations
+            node_mutations.extend(mutations_per_subtree.into_iter().flatten());
+
+            debug_assert!(!leaves.is_empty());
+        }
+
+        let new_root = leaves[0][0].hash;
+
+        // Create mutation set
+        let mutation_set = MutationSet {
+            old_root: self.root()?,
+            new_root,
+            node_mutations,
+            new_pairs,
+        };
+
+        Ok((mutation_set, subtree_cache, leaf_map_for_apply))
+    }
+
+    /// Internal helper: applies mutations with optionally preloaded leaves and subtrees.
+    fn apply_mutations_with_preloaded_leaves(
+        &mut self,
+        mutations: MutationSet<SMT_DEPTH, Word, Word>,
+        leaf_map: Map<u64, Option<SmtLeaf>>,
+        subtree_cache: Map<NodeIndex, Subtree>,
+    ) -> Result<(), LargeSmtError> {
+        use NodeMutation::*;
+
+        let MutationSet {
+            old_root,
+            node_mutations,
+            new_pairs,
+            new_root,
+        } = mutations;
+
+        // Guard against accidentally trying to apply mutations that were computed against a
+        // different tree, including a stale version of this tree.
+        let expected_root = self.root()?;
+        if old_root != expected_root {
+            return Err(LargeSmtError::Merkle(MerkleError::ConflictingRoots {
+                expected_root,
+                actual_root: old_root,
+            }));
+        }
+
+        // Sort mutations
+        let mut sorted_mutations: Vec<_> = Vec::from_iter(node_mutations);
+        sorted_mutations.par_sort_unstable_by_key(|(index, _)| Subtree::find_subtree_root(*index));
+
+        // Collect all unique subtree root indexes needed
+        let mut subtree_roots_indices: Vec<NodeIndex> = sorted_mutations
+            .iter()
+            .filter_map(|(index, _)| {
+                if index.depth() < IN_MEMORY_DEPTH {
+                    None
+                } else {
+                    Some(Subtree::find_subtree_root(*index))
+                }
+            })
+            .collect();
+        subtree_roots_indices.sort_unstable();
+        subtree_roots_indices.dedup();
+
+        // Build loaded_subtrees map efficiently
+        let mut loaded_subtrees = if !subtree_cache.is_empty() {
+            // Optimized path (insert_batch): use cache, create new for missing
+            let mut cache = subtree_cache;
+            subtree_roots_indices.into_iter().fold(Map::new(), |mut acc, index| {
+                let subtree = cache.remove(&index).unwrap_or_else(|| Subtree::new(index));
+                acc.insert(index, Some(subtree));
+                acc
+            })
+        } else {
+            // Two-step flow: batch load all needed subtrees from storage
+            self.storage
+                .get_subtrees(&subtree_roots_indices)?
+                .into_iter()
+                .zip(subtree_roots_indices)
+                .map(|(subtree_opt, index)| {
+                    (index, Some(subtree_opt.unwrap_or_else(|| Subtree::new(index))))
+                })
+                .collect()
+        };
+
+        // Process mutations
+        for (index, mutation) in sorted_mutations {
+            if index.depth() < IN_MEMORY_DEPTH {
+                match mutation {
+                    Removal => self.remove_inner_node(index),
+                    Addition(node) => self.insert_inner_node(index, node),
+                };
+            } else {
+                let subtree_root_index = Subtree::find_subtree_root(index);
+                let subtree = loaded_subtrees
+                    .get_mut(&subtree_root_index)
+                    .expect("Subtree map entry must exist")
+                    .as_mut()
+                    .expect("Subtree must exist as it was either fetched or created");
+
+                match mutation {
+                    Removal => subtree.remove_inner_node(index),
+                    Addition(node) => subtree.insert_inner_node(index, node),
+                };
+            }
+        }
+
+        // Go through subtrees, see if any are empty, and if so remove them
+        for (_index, subtree) in loaded_subtrees.iter_mut() {
+            if subtree.as_ref().is_some_and(|s| s.is_empty()) {
+                *subtree = None;
+            }
+        }
+
+        // Use the preloaded leaf map (already constructed in compute phase)
+        let mut leaf_map = leaf_map;
+
+        let mut leaf_count_delta = 0isize;
+        let mut entry_count_delta = 0isize;
+
+        for (key, value) in new_pairs {
+            let idx = Self::key_to_leaf_index(&key).value();
+            // Get leaf
+            let entry = leaf_map.entry(idx).or_insert(None);
+
+            // New values is empty, handle deletion
+            if value == Self::EMPTY_VALUE {
+                if let Some(leaf) = entry {
+                    // Leaf exists, handle deletion
+                    if leaf.remove(key).1 {
+                        // Key had previous value, decrement entry count
+                        entry_count_delta -= 1;
+                        if leaf.is_empty() {
+                            // Leaf is now empty, remove it and decrement leaf count
+                            *entry = None;
+                            leaf_count_delta -= 1;
+                        }
+                    }
+                }
+            } else {
+                // New value is not empty, handle update or create
+                match entry {
+                    Some(leaf) => {
+                        // Leaf exists, handle update
+                        if leaf.insert(key, value).expect("Failed to insert value").is_none() {
+                            // Key had no previous value, increment entry count
+                            entry_count_delta += 1;
+                        }
+                    },
+                    None => {
+                        // Leaf does not exist, create it
+                        *entry = Some(SmtLeaf::Single((key, value)));
+                        // Increment both entry and leaf count
+                        entry_count_delta += 1;
+                        leaf_count_delta += 1;
+                    },
+                }
+            }
+        }
+
+        let updates = StorageUpdates::from_parts(
+            leaf_map,
+            loaded_subtrees,
+            new_root,
+            leaf_count_delta,
+            entry_count_delta,
+        );
+        self.storage.apply(updates)?;
+        Ok(())
+    }
 
     fn build_subtrees(&mut self, mut entries: Vec<(Word, Word)>) -> Result<(), MerkleError> {
         entries.par_sort_unstable_by_key(|item| {
@@ -880,7 +1074,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     fn sorted_pairs_to_mutated_leaves_with_preloaded_leaves(
         &self,
         pairs: Vec<(Word, Word)>,
-        leaf_map: Map<u64, SmtLeaf>,
+        leaf_map: &Map<u64, SmtLeaf>,
     ) -> (MutatedSubtreeLeaves, Map<Word, Word>) {
         // Map to track new key-value pairs for mutated leaves
         let mut new_pairs = Map::new();
