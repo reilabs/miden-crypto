@@ -10,11 +10,13 @@
 use alloc::{string::ToString, vec::Vec};
 use core::ops::Range;
 
+use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use num::Integer;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, Uniform},
 };
+use subtle::ConstantTimeEq;
 
 use crate::{
     Felt, FieldElement, ONE, StarkField, Word, ZERO,
@@ -100,7 +102,7 @@ pub struct EncryptedData {
 pub struct AuthTag([Felt; AUTH_TAG_SIZE]);
 
 /// A 256-bit secret key represented as 4 field elements
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, SilentDebug, SilentDisplay)]
 pub struct SecretKey([Felt; SECRET_KEY_SIZE]);
 
 impl SecretKey {
@@ -120,6 +122,29 @@ impl SecretKey {
     /// Creates a new random secret key using the provided random number generator.
     pub fn with_rng<R: Rng>(rng: &mut R) -> Self {
         rng.sample(StandardUniform)
+    }
+
+    /// Creates a secret key from the provided array of field elements.
+    ///
+    /// # Security Warning
+    /// This method should be used with caution. Secret keys must be derived from a
+    /// cryptographically secure source of entropy. Do not use predictable or low-entropy
+    /// values as secret key material. Prefer using `new()` or `with_rng()` with a
+    /// cryptographically secure random number generator.
+    pub fn from_elements(elements: [Felt; SECRET_KEY_SIZE]) -> Self {
+        Self(elements)
+    }
+
+    // ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the secret key as an array of field elements.
+    ///
+    /// # Security Warning
+    /// This method exposes the raw secret key material. Use with caution and ensure
+    /// proper zeroization of the returned array when no longer needed.
+    pub fn to_elements(&self) -> [Felt; SECRET_KEY_SIZE] {
+        self.0
     }
 
     // ELEMENT ENCRYPTION
@@ -368,11 +393,18 @@ impl Distribution<SecretKey> for StandardUniform {
     }
 }
 
-impl Drop for SecretKey {
-    fn drop(&mut self) {
-        self.zeroize();
+impl PartialEq for SecretKey {
+    fn eq(&self, other: &Self) -> bool {
+        // Use constant-time comparison to prevent timing attacks
+        let mut result = true;
+        for (a, b) in self.0.iter().zip(other.0.iter()) {
+            result &= bool::from(a.as_int().ct_eq(&b.as_int()));
+        }
+        result
     }
 }
+
+impl Eq for SecretKey {}
 
 impl Zeroize for SecretKey {
     /// Securely clears the shared secret from memory.
@@ -394,6 +426,13 @@ impl Zeroize for SecretKey {
             }
         }
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+// Manual Drop implementation to ensure zeroization on drop.
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        self.zeroize();
     }
 }
 
@@ -454,7 +493,7 @@ impl SpongeState {
         AuthTag(
             self.state[RATE_RANGE_FIRST_HALF]
                 .try_into()
-                .expect("failed to convert to array"),
+                .expect("rate first half is exactly AUTH_TAG_SIZE elements"),
         )
     }
 
@@ -465,7 +504,9 @@ impl SpongeState {
 
     /// Squeeze the rate portion of the state
     fn squeeze_rate(&self) -> [Felt; RATE_WIDTH] {
-        self.state[RATE_RANGE].try_into().unwrap()
+        self.state[RATE_RANGE]
+            .try_into()
+            .expect("rate range is exactly RATE_WIDTH elements")
     }
 }
 
@@ -481,10 +522,29 @@ impl Nonce {
     pub fn with_rng<R: Rng>(rng: &mut R) -> Self {
         rng.sample(StandardUniform)
     }
+}
 
-    /// Creates a new nonce from the provided array of bytes
-    pub fn from_word(word: Word) -> Self {
+impl From<Word> for Nonce {
+    fn from(word: Word) -> Self {
         Nonce(word.into())
+    }
+}
+
+impl From<[Felt; NONCE_SIZE]> for Nonce {
+    fn from(elements: [Felt; NONCE_SIZE]) -> Self {
+        Nonce(elements)
+    }
+}
+
+impl From<Nonce> for Word {
+    fn from(nonce: Nonce) -> Self {
+        nonce.0.into()
+    }
+}
+
+impl From<Nonce> for [Felt; NONCE_SIZE] {
+    fn from(nonce: Nonce) -> Self {
+        nonce.0
     }
 }
 
@@ -536,7 +596,7 @@ impl Serializable for Nonce {
 
 impl Deserializable for Nonce {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let bytes: [u8; SK_SIZE_BYTES] = source.read_array()?;
+        let bytes: [u8; NONCE_SIZE_BYTES] = source.read_array()?;
 
         match bytes_to_elements_exact(&bytes) {
             Some(inner) => {
@@ -577,13 +637,13 @@ impl Deserializable for EncryptedData {
         let nonce: [Felt; NONCE_SIZE] = felts_from_u64(nonce)
             .map_err(DeserializationError::InvalidValue)?
             .try_into()
-            .expect("should not fail given the size of the vector");
+            .expect("deserialization reads exactly NONCE_SIZE elements");
 
         let tag = source.read_many(AUTH_TAG_SIZE)?;
         let tag: [Felt; AUTH_TAG_SIZE] = felts_from_u64(tag)
             .map_err(DeserializationError::InvalidValue)?
             .try_into()
-            .expect("should not fail given the size of the vector");
+            .expect("deserialization reads exactly AUTH_TAG_SIZE elements");
 
         Ok(Self {
             ciphertext,
