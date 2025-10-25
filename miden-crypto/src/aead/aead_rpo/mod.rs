@@ -17,13 +17,15 @@ use rand::{
 };
 
 use crate::{
-    Felt, ONE, StarkField, Word, ZERO,
-    aead::{DataType, EncryptionError},
+    Felt, FieldElement, ONE, StarkField, Word, ZERO,
+    aead::{AeadScheme, DataType, EncryptionError},
     hash::rpo::Rpo256,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_elements_with_padding, padded_elements_to_bytes,
+        bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
+        padded_elements_to_bytes,
     },
+    zeroize::{Zeroize, ZeroizeOnDrop},
 };
 
 #[cfg(test)]
@@ -35,8 +37,14 @@ mod test;
 /// Size of a secret key in field elements
 pub const SECRET_KEY_SIZE: usize = 4;
 
+/// Size of a secret key in bytes
+pub const SK_SIZE_BYTES: usize = SECRET_KEY_SIZE * Felt::ELEMENT_BYTES;
+
 /// Size of a nonce in field elements
 pub const NONCE_SIZE: usize = 4;
+
+/// Size of a nonce in bytes
+pub const NONCE_SIZE_BYTES: usize = NONCE_SIZE * Felt::ELEMENT_BYTES;
 
 /// Size of an authentication tag in field elements
 pub const AUTH_TAG_SIZE: usize = 4;
@@ -360,6 +368,37 @@ impl Distribution<SecretKey> for StandardUniform {
     }
 }
 
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl Zeroize for SecretKey {
+    /// Securely clears the shared secret from memory.
+    ///
+    /// # Security
+    ///
+    /// This implementation follows the same security methodology as the `zeroize` crate to ensure
+    /// that sensitive cryptographic material is reliably cleared from memory:
+    ///
+    /// - **Volatile writes**: Uses `ptr::write_volatile` to prevent dead store elimination and
+    ///   other compiler optimizations that might remove the zeroing operation.
+    /// - **Memory ordering**: Includes a sequentially consistent compiler fence (`SeqCst`) to
+    ///   prevent instruction reordering that could expose the secret data after this function
+    ///   returns.
+    fn zeroize(&mut self) {
+        for element in self.0.iter_mut() {
+            unsafe {
+                core::ptr::write_volatile(element, ZERO);
+            }
+        }
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl ZeroizeOnDrop for SecretKey {}
+
 // SPONGE STATE
 // ================================================================================================
 
@@ -465,6 +504,52 @@ impl Distribution<Nonce> for StandardUniform {
 // SERIALIZATION / DESERIALIZATION
 // ================================================================================================
 
+impl Serializable for SecretKey {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let bytes = elements_to_bytes(&self.0);
+        target.write_bytes(&bytes);
+    }
+}
+
+impl Deserializable for SecretKey {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let bytes: [u8; SK_SIZE_BYTES] = source.read_array()?;
+
+        match bytes_to_elements_exact(&bytes) {
+            Some(inner) => {
+                let inner: [Felt; 4] = inner.try_into().map_err(|_| {
+                    DeserializationError::InvalidValue("malformed secret key".to_string())
+                })?;
+                Ok(Self(inner))
+            },
+            None => Err(DeserializationError::InvalidValue("malformed secret key".to_string())),
+        }
+    }
+}
+
+impl Serializable for Nonce {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let bytes = elements_to_bytes(&self.0);
+        target.write_bytes(&bytes);
+    }
+}
+
+impl Deserializable for Nonce {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let bytes: [u8; SK_SIZE_BYTES] = source.read_array()?;
+
+        match bytes_to_elements_exact(&bytes) {
+            Some(inner) => {
+                let inner: [Felt; 4] = inner.try_into().map_err(|_| {
+                    DeserializationError::InvalidValue("malformed nonce".to_string())
+                })?;
+                Ok(Self(inner))
+            },
+            None => Err(DeserializationError::InvalidValue("malformed nonce".to_string())),
+        }
+    }
+}
+
 impl Serializable for EncryptedData {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // we serialize field elements in their canonical form
@@ -569,4 +654,73 @@ fn unpad(mut plaintext: Vec<Felt>) -> Result<Vec<Felt>, EncryptionError> {
 /// the u64 values is not a valid field element.
 fn felts_from_u64(input: Vec<u64>) -> Result<Vec<Felt>, alloc::string::String> {
     input.into_iter().map(Felt::try_from).collect()
+}
+
+// AEAD SCHEME IMPLEMENTATION
+// ================================================================================================
+
+/// RPO256-based AEAD scheme implementation
+pub struct AeadRpo;
+
+impl AeadScheme for AeadRpo {
+    const KEY_SIZE: usize = SK_SIZE_BYTES;
+
+    type Key = SecretKey;
+
+    fn key_from_bytes(bytes: &[u8]) -> Result<Self::Key, EncryptionError> {
+        SecretKey::read_from_bytes(bytes).map_err(|_| EncryptionError::FailedOperation)
+    }
+
+    fn encrypt_bytes<R: rand::CryptoRng + rand::RngCore>(
+        key: &Self::Key,
+        rng: &mut R,
+        plaintext: &[u8],
+        associated_data: &[u8],
+    ) -> Result<Vec<u8>, EncryptionError> {
+        let nonce = Nonce::with_rng(rng);
+        let encrypted_data = key
+            .encrypt_bytes_with_nonce(plaintext, associated_data, nonce)
+            .map_err(|_| EncryptionError::FailedOperation)?;
+
+        Ok(encrypted_data.to_bytes())
+    }
+
+    fn decrypt_bytes_with_associated_data(
+        key: &Self::Key,
+        ciphertext: &[u8],
+        associated_data: &[u8],
+    ) -> Result<Vec<u8>, EncryptionError> {
+        let encrypted_data = EncryptedData::read_from_bytes(ciphertext)
+            .map_err(|_| EncryptionError::FailedOperation)?;
+
+        key.decrypt_bytes_with_associated_data(&encrypted_data, associated_data)
+    }
+
+    // OPTIMIZED FELT METHODS
+    // --------------------------------------------------------------------------------------------
+
+    fn encrypt_elements<R: rand::CryptoRng + rand::RngCore>(
+        key: &Self::Key,
+        rng: &mut R,
+        plaintext: &[Felt],
+        associated_data: &[Felt],
+    ) -> Result<Vec<u8>, EncryptionError> {
+        let nonce = Nonce::with_rng(rng);
+        let encrypted_data = key
+            .encrypt_elements_with_nonce(plaintext, associated_data, nonce)
+            .map_err(|_| EncryptionError::FailedOperation)?;
+
+        Ok(encrypted_data.to_bytes())
+    }
+
+    fn decrypt_elements_with_associated_data(
+        key: &Self::Key,
+        ciphertext: &[u8],
+        associated_data: &[Felt],
+    ) -> Result<Vec<Felt>, EncryptionError> {
+        let encrypted_data = EncryptedData::read_from_bytes(ciphertext)
+            .map_err(|_| EncryptionError::FailedOperation)?;
+
+        key.decrypt_elements_with_associated_data(&encrypted_data, associated_data)
+    }
 }

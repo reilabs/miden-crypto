@@ -2,6 +2,7 @@
 
 - [BREAKING] Incremented MSRV to 1.89.
 - [BREAKING] Adds DSA (EdDSA25519) and ECDH (X25519) using Curve25519 ([#537](https://github.com/0xMiden/crypto/pull/537)).
+- Add implementation of sealed box primitive ([#514](https://github.com/0xMiden/crypto/pull/514)).
 - Added `AVX512` acceleration for RPO and RPX hash functions, including parallelized E-rounds for RPX ([#551](https://github.com/0xMiden/crypto/pull/551)).
 - Adds `HasherExt` trait to provide ability to hash using an iterator of slices. ([#565](https://github.com/0xMiden/crypto/pull/565)).
 - Added `SmtForest` structure ([#537](https://github.com/0xMiden/crypto/pull/563)).
