@@ -1,3 +1,5 @@
+## 0.19.0 (TBD)
+
 ## 0.18.0 (2025-10-27)
 
 - [BREAKING] Incremented MSRV to 1.90.
