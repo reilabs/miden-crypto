@@ -1,11 +1,11 @@
-use alloc::{string::String, vec::Vec};
+use alloc::string::String;
 use core::{
     mem::{size_of, transmute, transmute_copy},
     ops::Deref,
     slice::{self, from_raw_parts},
 };
 
-use super::{Digest, ElementHasher, Felt, FieldElement, Hasher};
+use super::{Digest, ElementHasher, Felt, FieldElement, Hasher, HasherExt};
 use crate::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, HexParseError, Serializable,
     bytes_to_hex_string, hex_to_bytes,
@@ -145,6 +145,16 @@ impl ElementHasher for Blake3_256 {
     }
 }
 
+impl HasherExt for Blake3_256 {
+    fn hash_iter<'a>(&self, slices: impl Iterator<Item = &'a [u8]>) -> Self::Digest {
+        let mut hasher = blake3::Hasher::new();
+        for slice in slices {
+            hasher.update(slice);
+        }
+        Blake3Digest(hasher.finalize().into())
+    }
+}
+
 impl Blake3_256 {
     /// Returns a hash of the provided sequence of bytes.
     #[inline(always)]
@@ -167,6 +177,15 @@ impl Blake3_256 {
     {
         <Self as ElementHasher>::hash_elements(elements)
     }
+
+    /// Hashes an iterator of byte slices.
+    #[inline(always)]
+    pub fn hash_iter<'a>(
+        &self,
+        slices: impl Iterator<Item = &'a [u8]>,
+    ) -> Blake3Digest<DIGEST32_BYTES> {
+        <Self as HasherExt>::hash_iter(self, slices)
+    }
 }
 
 // BLAKE3 192-BIT OUTPUT
@@ -175,6 +194,16 @@ impl Blake3_256 {
 /// 192-bit output blake3 hasher.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Blake3_192;
+
+impl HasherExt for Blake3_192 {
+    fn hash_iter<'a>(&self, slices: impl Iterator<Item = &'a [u8]>) -> Self::Digest {
+        let mut hasher = blake3::Hasher::new();
+        for slice in slices {
+            hasher.update(slice);
+        }
+        Blake3Digest(*shrink_bytes(&hasher.finalize().into()))
+    }
+}
 
 impl Hasher for Blake3_192 {
     /// Blake3 collision resistance is 96-bits for 24-bytes output.
@@ -187,8 +216,8 @@ impl Hasher for Blake3_192 {
     }
 
     fn merge_many(values: &[Self::Digest]) -> Self::Digest {
-        let bytes: Vec<u8> = values.iter().flat_map(|v| v.as_bytes()).collect();
-        Blake3Digest(*shrink_bytes(&blake3::hash(&bytes).into()))
+        let bytes = Blake3Digest::digests_as_bytes(values);
+        Blake3Digest(*shrink_bytes(&blake3::hash(bytes).into()))
     }
 
     fn merge(values: &[Self::Digest; 2]) -> Self::Digest {
@@ -236,6 +265,15 @@ impl Blake3_192 {
     {
         <Self as ElementHasher>::hash_elements(elements)
     }
+
+    /// Hashes an iterator of byte slices.
+    #[inline(always)]
+    pub fn hash_iter<'a>(
+        &self,
+        slices: impl Iterator<Item = &'a [u8]>,
+    ) -> Blake3Digest<DIGEST24_BYTES> {
+        <Self as HasherExt>::hash_iter(self, slices)
+    }
 }
 
 // BLAKE3 160-BIT OUTPUT
@@ -244,6 +282,16 @@ impl Blake3_192 {
 /// 160-bit output blake3 hasher.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Blake3_160;
+
+impl HasherExt for Blake3_160 {
+    fn hash_iter<'a>(&self, slices: impl Iterator<Item = &'a [u8]>) -> Self::Digest {
+        let mut hasher = blake3::Hasher::new();
+        for slice in slices {
+            hasher.update(slice);
+        }
+        Blake3Digest(*shrink_bytes(&hasher.finalize().into()))
+    }
+}
 
 impl Hasher for Blake3_160 {
     /// Blake3 collision resistance is 80-bits for 20-bytes output.
@@ -260,8 +308,8 @@ impl Hasher for Blake3_160 {
     }
 
     fn merge_many(values: &[Self::Digest]) -> Self::Digest {
-        let bytes: Vec<u8> = values.iter().flat_map(|v| v.as_bytes()).collect();
-        Blake3Digest(*shrink_bytes(&blake3::hash(&bytes).into()))
+        let bytes = Blake3Digest::digests_as_bytes(values);
+        Blake3Digest(*shrink_bytes(&blake3::hash(bytes).into()))
     }
 
     fn merge_with_int(seed: Self::Digest, value: u64) -> Self::Digest {
@@ -304,6 +352,15 @@ impl Blake3_160 {
         E: FieldElement<BaseField = Felt>,
     {
         <Self as ElementHasher>::hash_elements(elements)
+    }
+
+    /// Hashes an iterator of byte slices.
+    #[inline(always)]
+    pub fn hash_iter<'a>(
+        &self,
+        slices: impl Iterator<Item = &'a [u8]>,
+    ) -> Blake3Digest<DIGEST20_BYTES> {
+        <Self as HasherExt>::hash_iter(self, slices)
     }
 }
 

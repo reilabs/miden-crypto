@@ -1,3 +1,18 @@
+## 0.18.0 (2025-10-27)
+
+- [BREAKING] Incremented MSRV to 1.90.
+- Added implementation of sealed box primitive ([#514](https://github.com/0xMiden/crypto/pull/514)).
+- [BREAKING] Added DSA (EdDSA25519) and ECDH (X25519) using Curve25519 ([#537](https://github.com/0xMiden/crypto/pull/537)).
+- Added `AVX512` acceleration for RPO and RPX hash functions, including parallelized E-rounds for RPX ([#551](https://github.com/0xMiden/crypto/pull/551)).
+- Added `SmtForest` structure ([#563](https://github.com/0xMiden/crypto/pull/563)).
+- Added `HasherExt` trait to provide ability to hash using an iterator of slices. ([#565](https://github.com/0xMiden/crypto/pull/565)).
+- [BREAKING] Refactor `PartialSmt` to be constructible from a root ([#569](https://github.com/0xMiden/crypto/pull/569)).
+- Added `Debug`, `Clone`, `Eq` and `PartialEq` derives to secret key structs for DSA-s ([#589](https://github.com/0xMiden/crypto/pull/589)).
+- Added zeroization of secret key structs for DSA-s ([#590](https://github.com/0xMiden/crypto/pull/590)).
+- Added `SmtProof::authenticated_nodes()` delegating to `SparseMerklePath::authenticated_nodes` ([#585](https://github.com/0xMiden/crypto/pull/585)).
+- Refactored `LargeSmt` to use flat `Vec<Word>` layout for in-memory nodes ([#591](https://github.com/0xMiden/crypto/pull/594)).
+- Added benchmarks for ECDSA-k256 and EdDSA-25519 ([#598](https://github.com/0xMiden/crypto/pull/598)).
+
 ## 0.17.1 (2025-10-10)
 
 - Support ECDSA signing/verifying with prehashed messages ([#573](https://github.com/0xMiden/crypto/pull/573)).
@@ -20,7 +35,7 @@
 
 - [BREAKING] Incremented MSRV to 1.88.
 - Added implementation of Poseidon2 hash function ([#429](https://github.com/0xMiden/crypto/issues/429)).
-- [BREAKING] Make Falcon DSA deterministic ([#436](https://github.com/0xMiden/crypto/pull/436).
+- [BREAKING] Make Falcon DSA deterministic ([#436](https://github.com/0xMiden/crypto/pull/436)).
 - [BREAKING] Remove generics from `MerkleStore` and remove `KvMap` and `RecordingMap` ([#442](https://github.com/0xMiden/crypto/issues/442)).
 - [BREAKING] Rename `smt_hashmaps` feature to `hashmaps` ([#442](https://github.com/0xMiden/crypto/issues/442)).
 - [BREAKING] Refactor `parse_hex_string_as_word()` to `Word::parse()` ([#450](https://github.com/0xMiden/crypto/issues/450)).

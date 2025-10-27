@@ -7,16 +7,18 @@ use k256::{
     ecdh::diffie_hellman,
     ecdsa::{RecoveryId, SigningKey, VerifyingKey, signature::hazmat::PrehashVerifier},
 };
+use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use rand::{CryptoRng, RngCore};
 use thiserror::Error;
 
 use crate::{
     Felt, SequentialCommit, Word,
-    ecdh::{EphemeralPublicKey, SharedSecret},
+    ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_elements_with_padding,
     },
+    zeroize::{Zeroize, ZeroizeOnDrop},
 };
 
 #[cfg(test)]
@@ -40,6 +42,7 @@ const SCALARS_SIZE_BYTES: usize = 32;
 // ================================================================================================
 
 /// Secret key for ECDSA signature verification over secp256k1 curve.
+#[derive(Clone, SilentDebug, SilentDisplay)]
 pub struct SecretKey {
     inner: SigningKey,
 }
@@ -66,6 +69,10 @@ impl SecretKey {
         let mut rng = rand_hc::Hc128Rng::from_seed(seed);
 
         let signing_key = SigningKey::random(&mut rng);
+
+        // Zeroize the seed to prevent leaking secret material
+        seed.zeroize();
+
         Self { inner: signing_key }
     }
 
@@ -105,6 +112,19 @@ impl SecretKey {
         SharedSecret::new(shared_secret_inner)
     }
 }
+
+// SAFETY: The inner `k256::ecdsa::SigningKey` already implements `ZeroizeOnDrop`,
+// which ensures that the secret key material is securely zeroized when dropped.
+impl ZeroizeOnDrop for SecretKey {}
+
+impl PartialEq for SecretKey {
+    fn eq(&self, other: &Self) -> bool {
+        use subtle::ConstantTimeEq;
+        self.to_bytes().ct_eq(&other.to_bytes()).into()
+    }
+}
+
+impl Eq for SecretKey {}
 
 // PUBLIC KEY
 // ================================================================================================
@@ -262,10 +282,11 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let bytes: [u8; SECRET_KEY_BYTES] = source.read_array()?;
+        let mut bytes: [u8; SECRET_KEY_BYTES] = source.read_array()?;
 
         let signing_key = SigningKey::from_slice(&bytes)
             .map_err(|_| DeserializationError::InvalidValue("Invalid secret key".to_string()))?;
+        bytes.zeroize();
 
         Ok(Self { inner: signing_key })
     }

@@ -10,6 +10,7 @@ pub mod aead;
 pub mod dsa;
 pub mod ecdh;
 pub mod hash;
+pub mod ies;
 pub mod merkle;
 pub mod rand;
 pub mod utils;
@@ -18,6 +19,7 @@ pub mod word;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use k256::elliptic_curve::zeroize;
 pub use winter_math::{
     FieldElement, StarkField,
     fields::{CubeExtension, QuadExtension, f64::BaseElement as Felt},
