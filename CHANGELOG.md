@@ -3,6 +3,10 @@
 - Added `compute_challenge_k()` and `verify_with_unchecked_k()` methods to separate hashing and EC logic in EdDSA over Ed25519 ([#602](https://github.com/0xMiden/crypto/pull/602)).
 - Fixed IES sealed box deserialization ([#616](https://github.com/0xMiden/crypto/pull/616)).
 
+## 0.18.1 (2025-11-05)
+
+- [BREAKING] removed un-needed mutability from ECDSA `sign()` function ([#628](https://github.com/0xMiden/crypto/pull/628)).
+
 ## 0.18.0 (2025-10-27)
 
 - [BREAKING] Incremented MSRV to 1.90.
