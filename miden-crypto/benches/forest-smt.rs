@@ -1,6 +1,6 @@
 use std::hint;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use miden_crypto::{
     Word,
     merkle::{EmptySubtreeRoots, SMT_DEPTH, SmtForest},
@@ -61,12 +61,6 @@ benchmark_batch! {
     |size| Some(criterion::Throughput::Elements(size as u64))
 }
 
-criterion_group!(
-    smt_forest_benches,
-    smt_forest_open,
-    smt_forest_batch_insert,
-);
+criterion_group!(smt_forest_benches, smt_forest_open, smt_forest_batch_insert,);
 
 criterion_main!(smt_forest_benches);
-
-
