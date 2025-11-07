@@ -46,6 +46,11 @@ harness = false
 name    = "forest-smt"
 
 [[bench]]
+harness           = false
+name              = "persisted-forest-smt"
+required-features = ["rocksdb"]
+
+[[bench]]
 harness = false
 name    = "store"
 
