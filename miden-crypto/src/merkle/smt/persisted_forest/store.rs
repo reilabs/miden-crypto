@@ -116,9 +116,9 @@ impl ForestInnerNode {
 }
 
 #[derive(Clone, Debug)]
-struct IndexedPath {
-    value: Word,
-    path: Vec<(NodeIndex, Word)>,
+pub struct IndexedPath {
+    pub value: Word,
+    pub path: Vec<(NodeIndex, Word)>,
 }
 
 impl RocksDbForestStore {
@@ -218,7 +218,7 @@ impl RocksDbForestStore {
     pub fn set_leaves(
         &self,
         root: Word,
-        leaves: impl IntoIterator<Item = (NodeIndex, Word)>,
+        leaves: impl IntoIterator<Item = (NodeIndex, IndexedPath, Word)>,
     ) -> Result<Word, MerkleError> {
         let cf = self.cf_handle(NODES_CF).map_err(MerkleError::from)?;
         if self.db.get_cf(cf, root.as_bytes()).map_err(ForestStoreError::from)?.is_none() {
@@ -228,9 +228,7 @@ impl RocksDbForestStore {
         let mut nodes_by_index = Map::<NodeIndex, Word>::new();
         let mut leaves_by_index = Map::<NodeIndex, Word>::new();
 
-        for (index, leaf_hash) in leaves {
-            let indexed_path = self.get_indexed_path(root, index)?;
-
+        for (index, indexed_path, leaf_hash) in leaves {
             if indexed_path.value == leaf_hash {
                 continue;
             }
@@ -384,7 +382,7 @@ impl RocksDbForestStore {
         Ok(result)
     }
 
-    fn get_indexed_path(&self, root: Word, index: NodeIndex) -> Result<IndexedPath, MerkleError> {
+    pub fn get_indexed_path(&self, root: Word, index: NodeIndex) -> Result<IndexedPath, MerkleError> {
         let cf = self.cf_handle(NODES_CF).map_err(MerkleError::from)?;
 
         let mut hash = root;

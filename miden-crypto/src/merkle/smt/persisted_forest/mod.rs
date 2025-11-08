@@ -48,40 +48,41 @@ impl PersistedSmtForest {
         let mut new_leaves = Map::new();
         for index in indices {
             let node_index = NodeIndex::from(index);
-            let current_hash = self.store.get_node(root, node_index)?;
+            let indexed_path = self.store.get_indexed_path(root, node_index)?;
+            let current_hash = indexed_path.value;
 
             let current_leaf = self
                 .store
                 .get_leaf_by_hash(&current_hash)?
                 .unwrap_or_else(|| SmtLeaf::new_empty(index));
 
-            new_leaves.insert(index, (current_hash, current_leaf));
+            new_leaves.insert(index, (current_hash, indexed_path, current_leaf));
         }
 
         for (key, value) in entries {
             let index = LeafIndex::from(key);
-            let (_old_hash, leaf) = new_leaves.get_mut(&index).unwrap();
+            let (_old_hash, _indexed_path, leaf) = new_leaves.get_mut(&index).unwrap();
             leaf.insert(key, value).map_err(to_merkle_error)?;
         }
 
         new_leaves = new_leaves
             .into_iter()
-            .filter_map(|(key, (old_hash, leaf))| {
+            .filter_map(|(key, (old_hash, indexed_path, leaf))| {
                 let new_hash = leaf.hash();
                 if new_hash == old_hash {
                     None
                 } else {
-                    Some((key, (new_hash, leaf)))
+                    Some((key, (new_hash, indexed_path, leaf)))
                 }
             })
             .collect();
 
         let new_root = self.store.set_leaves(
             root,
-            new_leaves.iter().map(|(index, leaf)| (NodeIndex::from(*index), leaf.0)),
+            new_leaves.iter().map(|(index, leaf)| (NodeIndex::from(*index), leaf.1.clone(), leaf.0)),
         )?;
 
-        for (leaf_hash, leaf) in new_leaves.into_values() {
+        for (leaf_hash, _indexed_path, leaf) in new_leaves.into_values() {
             self.store.insert_leaf(leaf_hash, &leaf)?;
         }
         self.store.insert_root(new_root)?;
