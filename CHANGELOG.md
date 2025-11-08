@@ -1,10 +1,14 @@
 ## 0.19.0 (TBD)
-- Add serialization of sealing and unsealing keys in IES ([#637](https://github.com/0xMiden/crypto/pull/637)).
 
 - Added `compute_challenge_k()` and `verify_with_unchecked_k()` methods to separate hashing and EC logic in EdDSA over Ed25519 ([#602](https://github.com/0xMiden/crypto/pull/602)).
 - Refactored `LargeSmt::apply_mutations_with_reversion` to use batched storage operations ([#613](https://github.com/0xMiden/crypto/pull/613)).
 - Fixed IES sealed box deserialization ([#616](https://github.com/0xMiden/crypto/pull/616)).
+- Add serialization of sealing and unsealing keys in IES ([#637](https://github.com/0xMiden/crypto/pull/637)).
 - Fixed undefined `BaseElement` in rescue arch optimizations ([#644](https://github.com/0xMiden/crypto/pull/644)).
+
+## 0.18.2 (2025-11-08)
+
+- Changed the methodology for computing ECDSA and EdDSA public key commitments ([#643](https://github.com/0xMiden/crypto/pull/643)).
 
 ## 0.18.1 (2025-11-05)
 
