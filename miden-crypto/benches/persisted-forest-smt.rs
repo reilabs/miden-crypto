@@ -101,4 +101,3 @@ criterion_group!(
 );
 
 criterion_main!(persisted_smt_forest_benches);
-
