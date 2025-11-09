@@ -1,20 +1,12 @@
-#[cfg(not(feature = "hashmaps"))]
-use alloc::collections::btree_map::Entry as MapEntry;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use std::sync::{PoisonError, RwLock};
 
-#[cfg(feature = "hashmaps")]
-use hashbrown::hash_map::Entry as MapEntry;
-
 use super::{SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
 use crate::{
-    EMPTY_WORD, Word,
+    EMPTY_WORD, Map, MapEntry, Word,
     merkle::{
         EmptySubtreeRoots, InnerNode, NodeIndex, SmtLeaf,
-        smt::{
-            Map,
-            large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
-        },
+        smt::large::{IN_MEMORY_DEPTH, SMT_DEPTH, subtree::Subtree},
     },
 };
 
@@ -144,6 +136,7 @@ impl SmtStorage for MemoryStorage {
                 }
                 old_value
             },
+            // Leaf at index does not exist, so no value could be removed.
             MapEntry::Vacant(_) => None,
         };
         Ok(old_value)
