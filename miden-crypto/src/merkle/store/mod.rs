@@ -180,7 +180,8 @@ impl MerkleStore {
         Ok(MerkleProof::new(hash, MerklePath::new(path)))
     }
 
-    /// Returns `true` if a valid path exists from `root` to the specified `index`, `false` otherwise.
+    /// Returns `true` if a valid path exists from `root` to the specified `index`, `false`
+    /// otherwise.
     ///
     /// This method checks if all nodes needed to traverse from `root` to `index` are present in the
     /// store, without building the actual path. It is more efficient than `get_path` when only
@@ -190,7 +191,7 @@ impl MerkleStore {
         if self.nodes.get(&root).is_none() {
             return false;
         }
-        
+
         // traverse from root to index
         let mut hash = root;
         for i in (0..index.depth()).rev() {
