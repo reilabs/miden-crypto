@@ -659,10 +659,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(0, LEAVES[0]).unwrap(),
-        mtree1.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(0, LEAVES[0]).unwrap(), mtree1.root());
 
     let position = 1;
     let proof = mmr.open(position).unwrap();
@@ -675,10 +672,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(1, LEAVES[1]).unwrap(),
-        mtree1.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(1, LEAVES[1]).unwrap(), mtree1.root());
 
     let position = 2;
     let proof = mmr.open(position).unwrap();
@@ -691,10 +685,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(2, LEAVES[2]).unwrap(),
-        mtree1.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(2, LEAVES[2]).unwrap(), mtree1.root());
 
     let position = 3;
     let proof = mmr.open(position).unwrap();
@@ -707,10 +698,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(3, LEAVES[3]).unwrap(),
-        mtree1.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(3, LEAVES[3]).unwrap(), mtree1.root());
 
     let position = 4;
     let proof = mmr.open(position).unwrap();
@@ -722,10 +710,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(0, LEAVES[4]).unwrap(),
-        mtree2.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(0, LEAVES[4]).unwrap(), mtree2.root());
 
     let position = 5;
     let proof = mmr.open(position).unwrap();
@@ -737,10 +722,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(1, LEAVES[5]).unwrap(),
-        mtree2.root()
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(1, LEAVES[5]).unwrap(), mtree2.root());
 
     let position = 6;
     let proof = mmr.open(position).unwrap();
@@ -752,10 +734,7 @@ fn test_mmr_open_seven() {
             leaf: LEAVES[position],
         }
     );
-    assert_eq!(
-        proof.path.merkle_path.compute_root(0, LEAVES[6]).unwrap(),
-        LEAVES[6]
-    );
+    assert_eq!(proof.path.merkle_path.compute_root(0, LEAVES[6]).unwrap(), LEAVES[6]);
 }
 
 #[test]

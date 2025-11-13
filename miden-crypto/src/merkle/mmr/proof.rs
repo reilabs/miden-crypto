@@ -1,8 +1,7 @@
-use crate::Word;
-
 /// The representation of a single Merkle path.
 use super::super::MerklePath;
 use super::forest::Forest;
+use crate::Word;
 
 // MMR PROOF
 // ================================================================================================
