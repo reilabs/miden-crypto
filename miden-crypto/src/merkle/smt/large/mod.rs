@@ -171,7 +171,7 @@ use utils::{is_empty_parent, to_memory_index};
 
 mod batch_ops;
 mod construction;
-mod trait_impl;
+mod smt_trait;
 
 // CONSTANTS
 // ================================================================================================
