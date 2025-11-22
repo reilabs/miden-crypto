@@ -1,4 +1,5 @@
-## 1.18.3 (TBD)
+## 1.18.3 (2025-11-22)
+
 - [BREAKING] removed unused 'self' parameter in HasherExt and all its implementations ([#666](https://github.com/0xMiden/crypto/pull/666))
 
 ## 0.18.2 (2025-11-08)
