@@ -11,7 +11,11 @@
 - Refactored `LargeSmt` into smaller focused modules ([#658](https://github.com/0xMiden/crypto/pull/658)).
 - Added property-based testing for `LargeSmt` verifying `insert_batch` equivalence with `compute_mutations`+`apply_mutations`. ([#667](https://github.com/0xMiden/crypto/pull/667)).
 
-## 1.18.3 (2025-11-22)
+## 0.18.4 (2025-11-22)
+
+- Fixed serialization of `PartialSmt` panicking in debug mode when it was constructed from only a root ([#662](https://github.com/0xMiden/crypto/pull/662)).
+
+## 0.18.3 (2025-11-22)
 
 - [BREAKING] removed unused 'self' parameter in HasherExt and all its implementations ([#666](https://github.com/0xMiden/crypto/pull/666))
 
