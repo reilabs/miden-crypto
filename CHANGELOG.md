@@ -1,4 +1,4 @@
-## 0.18.4 (TODO)
+## 0.18.4 (2025-11-22)
 
 - Fixed serialization of `PartialSmt` panicking in debug mode when it was constructed from only a root ([#662](https://github.com/0xMiden/crypto/pull/662)).
 
