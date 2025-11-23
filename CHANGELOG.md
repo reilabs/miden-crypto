@@ -10,6 +10,10 @@
 - Added `MerkleStore::has_path()` ([#649](https://github.com/0xMiden/crypto/pull/649)).
 - Refactored `LargeSmt` into smaller focused modules ([#658](https://github.com/0xMiden/crypto/pull/658)).
 
+## 1.18.3 (2025-11-22)
+
+- [BREAKING] removed unused 'self' parameter in HasherExt and all its implementations ([#666](https://github.com/0xMiden/crypto/pull/666))
+
 ## 0.18.2 (2025-11-08)
 
 - Changed the methodology for computing ECDSA and EdDSA public key commitments ([#643](https://github.com/0xMiden/crypto/pull/643)).
