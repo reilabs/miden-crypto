@@ -15,24 +15,18 @@ mod path;
 mod sparse_path;
 
 pub mod mmr;
-
 pub mod smt;
-
 pub mod store;
 
-// REEXPORTS - MERKLE TREE
+// REEXPORTS
 // ================================================================================================
 
 pub use empty_roots::EmptySubtreeRoots;
 pub use error::MerkleError;
 pub use index::NodeIndex;
 pub use merkle_tree::{MerkleTree, path_to_text, tree_to_text};
-// REEXPORTS - OTHER
-// ================================================================================================
 pub use node::InnerNodeInfo;
 pub use partial_mt::PartialMerkleTree;
-// REEXPORTS - PATHS
-// ================================================================================================
 pub use path::{MerklePath, MerkleProof, RootPath};
 pub use sparse_path::SparseMerklePath;
 
