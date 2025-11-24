@@ -222,20 +222,12 @@ impl Serializable for RpoRandomCoin {
 
 impl Deserializable for RpoRandomCoin {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let state = [
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-        ];
+        let state_vec = crate::utils::read_felt_array(source, STATE_WIDTH)?;
+        let state: [Felt; STATE_WIDTH] = state_vec
+            .try_into()
+            .map_err(|_| DeserializationError::InvalidValue(
+                format!("invalid state array length, expected {STATE_WIDTH}"),
+            ))?;
         let current = source.read_u8()? as usize;
         if !(RATE_START..RATE_END).contains(&current) {
             return Err(DeserializationError::InvalidValue(
