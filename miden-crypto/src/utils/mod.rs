@@ -266,3 +266,25 @@ pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
         })
         .collect()
 }
+
+/// Deserializes an array of `Felt` elements from a byte reader.
+///
+/// # Arguments
+/// * `source` - The byte reader to deserialize from
+/// * `len` - The length of the array to deserialize
+///
+/// # Returns
+/// `Result<Vec<Felt>, DeserializationError>` - Vector of deserialized `Felt` elements
+///
+/// # Errors
+/// Returns `DeserializationError` if deserialization fails for any element
+pub fn read_felt_array<R: ByteReader>(
+    source: &mut R,
+    len: usize,
+) -> Result<Vec<Felt>, DeserializationError> {
+    let mut result = Vec::with_capacity(len);
+    for _ in 0..len {
+        result.push(Felt::read_from(source)?);
+    }
+    Ok(result)
+}
