@@ -5,7 +5,7 @@ use crate::{
     hash::rpo::Rpo256,
     merkle::{
         EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex,
-        SMT_DEPTH,
+        smt::SMT_DEPTH,
     },
 };
 
