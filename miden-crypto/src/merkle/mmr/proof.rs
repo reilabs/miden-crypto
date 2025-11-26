@@ -10,17 +10,38 @@ use crate::Word;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MmrPath {
     /// The state of the MMR when the MMR path was created.
-    pub forest: Forest,
+    forest: Forest,
 
     /// The position of the leaf value within the MMR.
-    pub position: usize,
+    position: usize,
 
     /// The Merkle opening, starting from the value's sibling up to and excluding the root of the
     /// responsible tree.
-    pub merkle_path: MerklePath,
+    merkle_path: MerklePath,
 }
 
 impl MmrPath {
+    /// Creates a new `MmrPath` with the given forest, position, and merkle path.
+    pub fn new(forest: Forest, position: usize, merkle_path: MerklePath) -> Self {
+        Self { forest, position, merkle_path }
+    }
+
+    /// Returns the state of the MMR when the MMR path was created.
+    pub fn forest(&self) -> Forest {
+        self.forest
+    }
+
+    /// Returns the position of the leaf value within the MMR.
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
+    /// Returns the Merkle opening, starting from the value's sibling up to and excluding the root
+    /// of the responsible tree.
+    pub fn merkle_path(&self) -> &MerklePath {
+        &self.merkle_path
+    }
+
     /// Converts the leaf global position into a local position that can be used to verify the
     /// Merkle path.
     pub fn relative_pos(&self) -> usize {
@@ -39,13 +60,28 @@ impl MmrPath {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MmrProof {
     /// The Merkle path data describing how to authenticate the leaf.
-    pub path: MmrPath,
+    path: MmrPath,
 
     /// The leaf value that was opened.
-    pub leaf: Word,
+    leaf: Word,
 }
 
 impl MmrProof {
+    /// Creates a new `MmrProof` with the given path and leaf.
+    pub fn new(path: MmrPath, leaf: Word) -> Self {
+        Self { path, leaf }
+    }
+
+    /// Returns the Merkle path data describing how to authenticate the leaf.
+    pub fn path(&self) -> &MmrPath {
+        &self.path
+    }
+
+    /// Returns the leaf value that was opened.
+    pub fn leaf(&self) -> Word {
+        self.leaf
+    }
+
     /// Converts the leaf global position into a local position that can be used to verify the
     /// merkle_path.
     pub fn relative_pos(&self) -> usize {
@@ -117,12 +153,7 @@ mod tests {
     }
 
     fn make_dummy_proof(forest: Forest, position: usize) -> MmrProof {
-        let path = MmrPath {
-            forest,
-            position,
-            merkle_path: MerklePath::default(),
-        };
-
-        MmrProof { path, leaf: Word::empty() }
+        let path = MmrPath::new(forest, position, MerklePath::default());
+        MmrProof::new(path, Word::empty())
     }
 }

@@ -102,13 +102,9 @@ impl Mmr {
         }
         let (leaf, path) = self.collect_merkle_path_and_value(pos, forest)?;
 
-        let path = MmrPath {
-            forest,
-            position: pos,
-            merkle_path: MerklePath::new(path),
-        };
+        let path = MmrPath::new(forest, pos, MerklePath::new(path));
 
-        Ok(MmrProof { path, leaf })
+        Ok(MmrProof::new(path, leaf))
     }
 
     /// Returns the leaf value at position `pos`.

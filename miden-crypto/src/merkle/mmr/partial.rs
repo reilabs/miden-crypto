@@ -180,11 +180,7 @@ impl PartialMmr {
             // The requested `pos` is not being tracked.
             Ok(None)
         } else {
-            Ok(Some(MmrPath {
-                forest: self.forest,
-                position: pos,
-                merkle_path: MerklePath::new(nodes),
-            }))
+            Ok(Some(MmrPath::new(self.forest, pos, MerklePath::new(nodes))))
         }
     }
 
@@ -651,13 +647,13 @@ mod tests {
         {
             let node = mmr.get(1).unwrap();
             let proof = mmr.open(1).unwrap();
-            partial_mmr.track(1, node, &proof.path.merkle_path).unwrap();
+            partial_mmr.track(1, node, proof.path().merkle_path()).unwrap();
         }
 
         {
             let node = mmr.get(8).unwrap();
             let proof = mmr.open(8).unwrap();
-            partial_mmr.track(8, node, &proof.path.merkle_path).unwrap();
+            partial_mmr.track(8, node, proof.path().merkle_path()).unwrap();
         }
 
         // add 2 more nodes into the MMR and validate apply_delta()
@@ -670,7 +666,7 @@ mod tests {
         {
             let node = mmr.get(12).unwrap();
             let proof = mmr.open(12).unwrap();
-            partial_mmr.track(12, node, &proof.path.merkle_path).unwrap();
+            partial_mmr.track(12, node, proof.path().merkle_path()).unwrap();
             assert!(partial_mmr.track_latest);
         }
 
@@ -711,7 +707,7 @@ mod tests {
             let pos = index.inner() / 2;
             let proof1 = partial.open(pos).unwrap().unwrap();
             let proof2 = mmr.open(pos).unwrap();
-            assert_eq!(proof1, proof2.path);
+            assert_eq!(proof1, *proof2.path());
         }
     }
 
@@ -729,7 +725,7 @@ mod tests {
 
         // create partial MMR and add authentication path to node at position 1
         let mut partial_mmr: PartialMmr = mmr.peaks().into();
-        partial_mmr.track(1, node1, &proof1.path.merkle_path).unwrap();
+        partial_mmr.track(1, node1, proof1.path().merkle_path()).unwrap();
 
         // empty iterator should have no nodes
         assert_eq!(partial_mmr.inner_nodes([].iter().cloned()).next(), None);
@@ -741,7 +737,7 @@ mod tests {
         let index1 = NodeIndex::new(2, 1).unwrap();
         let path1 = store.get_path(first_peak, index1).unwrap().path;
 
-        assert_eq!(path1, proof1.path.merkle_path);
+        assert_eq!(path1, *proof1.path().merkle_path());
 
         // -- test no duplicates --------------------------
 
@@ -754,9 +750,9 @@ mod tests {
         let node2 = mmr.get(2).unwrap();
         let proof2 = mmr.open(2).unwrap();
 
-        partial_mmr.track(0, node0, &proof0.path.merkle_path).unwrap();
-        partial_mmr.track(1, node1, &proof1.path.merkle_path).unwrap();
-        partial_mmr.track(2, node2, &proof2.path.merkle_path).unwrap();
+        partial_mmr.track(0, node0, proof0.path().merkle_path()).unwrap();
+        partial_mmr.track(1, node1, proof1.path().merkle_path()).unwrap();
+        partial_mmr.track(2, node2, proof2.path().merkle_path()).unwrap();
 
         // make sure there are no duplicates
         let leaves = [(0, node0), (1, node1), (2, node2)];
@@ -776,9 +772,9 @@ mod tests {
         let path1 = store.get_path(first_peak, index1).unwrap().path;
         let path2 = store.get_path(first_peak, index2).unwrap().path;
 
-        assert_eq!(path0, proof0.path.merkle_path);
-        assert_eq!(path1, proof1.path.merkle_path);
-        assert_eq!(path2, proof2.path.merkle_path);
+        assert_eq!(path0, *proof0.path().merkle_path());
+        assert_eq!(path1, *proof1.path().merkle_path());
+        assert_eq!(path2, *proof2.path().merkle_path());
 
         // -- test multiple trees -------------------------
 
@@ -788,8 +784,8 @@ mod tests {
         let node5 = mmr.get(5).unwrap();
         let proof5 = mmr.open(5).unwrap();
 
-        partial_mmr.track(1, node1, &proof1.path.merkle_path).unwrap();
-        partial_mmr.track(5, node5, &proof5.path.merkle_path).unwrap();
+        partial_mmr.track(1, node1, proof1.path().merkle_path()).unwrap();
+        partial_mmr.track(5, node5, proof5.path().merkle_path()).unwrap();
 
         // build Merkle store from authentication paths in partial MMR
         let mut store: MerkleStore = MerkleStore::new();
@@ -803,8 +799,8 @@ mod tests {
         let path1 = store.get_path(first_peak, index1).unwrap().path;
         let path5 = store.get_path(second_peak, index5).unwrap().path;
 
-        assert_eq!(path1, proof1.path.merkle_path);
-        assert_eq!(path5, proof5.path.merkle_path);
+        assert_eq!(path1, *proof1.path().merkle_path());
+        assert_eq!(path5, *proof5.path().merkle_path());
     }
 
     #[test]
@@ -839,7 +835,7 @@ mod tests {
             for pos in 0..i {
                 let mmr_proof = mmr.open(pos).unwrap();
                 let partialmmr_proof = partial_mmr.open(pos).unwrap().unwrap();
-                assert_eq!(mmr_proof.path, partialmmr_proof);
+                assert_eq!(*mmr_proof.path(), partialmmr_proof);
             }
         }
     }
@@ -850,7 +846,7 @@ mod tests {
 
         // derive a partial Mmr from it which tracks authentication path to leaf 5
         let mut partial_mmr = PartialMmr::from_peaks(mmr.peaks());
-        let path_to_5 = mmr.open(5).unwrap().path.merkle_path;
+        let path_to_5 = mmr.open(5).unwrap().path().merkle_path().clone();
         let leaf_at_5 = mmr.get(5).unwrap();
         partial_mmr.track(5, leaf_at_5, &path_to_5).unwrap();
 
@@ -860,7 +856,7 @@ mod tests {
         partial_mmr.add(leaf_at_7, false);
 
         // the openings should be the same
-        assert_eq!(mmr.open(5).unwrap().path, partial_mmr.open(5).unwrap().unwrap());
+        assert_eq!(*mmr.open(5).unwrap().path(), partial_mmr.open(5).unwrap().unwrap());
     }
 
     #[test]
@@ -889,8 +885,8 @@ mod tests {
 
         // create partial MMR and add authentication path to nodes at position 1 and 2
         let mut partial_mmr: PartialMmr = mmr.peaks().into();
-        partial_mmr.track(1, node1, &proof1.path.merkle_path).unwrap();
-        partial_mmr.track(2, node2, &proof2.path.merkle_path).unwrap();
+        partial_mmr.track(1, node1, proof1.path().merkle_path()).unwrap();
+        partial_mmr.track(2, node2, proof2.path().merkle_path()).unwrap();
 
         // untrack nodes at positions 1 and 2
         partial_mmr.untrack(1);
