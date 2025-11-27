@@ -161,7 +161,9 @@ mod subtree;
 pub use subtree::{Subtree, SubtreeError};
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
+pub use storage::{
+    MemoryStorage, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates, SubtreeUpdate,
+};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 
@@ -211,17 +213,6 @@ type LoadedLeaves = (Vec<u64>, Map<u64, Option<SmtLeaf>>);
 /// - `isize`: Leaf count delta
 /// - `isize`: Entry count delta
 type MutatedLeaves = (MutatedSubtreeLeaves, Map<u64, SmtLeaf>, Map<Word, Word>, isize, isize);
-
-/// Represents a storage update for a subtree after processing mutations.
-#[derive(Debug)]
-enum SubtreeUpdate {
-    /// No storage update needed (in-memory or unchanged).
-    None,
-    /// Store the modified subtree at the given index.
-    Store { index: NodeIndex, subtree: Subtree },
-    /// Delete the subtree at the given index (became empty).
-    Delete { index: NodeIndex },
-}
 
 // LargeSmt
 // ================================================================================================
