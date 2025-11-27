@@ -9,15 +9,15 @@ use core::{
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
-use crate::{EMPTY_WORD, Felt, Map, Word, hash::rpo::Rpo256};
+use crate::{hash::rpo::Rpo256, Felt, Map, Word, EMPTY_WORD};
 
 mod full;
-pub use full::{MAX_LEAF_ENTRIES, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
+pub use full::{Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError, MAX_LEAF_ENTRIES, SMT_DEPTH};
 
 #[cfg(feature = "concurrent")]
 mod large;
 #[cfg(feature = "internal")]
-pub use full::concurrent::{SubtreeLeaf, build_subtree_for_bench};
+pub use full::concurrent::{build_subtree_for_bench, SubtreeLeaf};
 #[cfg(feature = "concurrent")]
 pub use large::{
     LargeSmt, LargeSmtError, MemoryStorage, SmtStorage, StorageUpdateParts, StorageUpdates,
@@ -25,6 +25,15 @@ pub use large::{
 };
 #[cfg(feature = "rocksdb")]
 pub use large::{RocksDbConfig, RocksDbStorage};
+#[cfg(feature = "concurrent")]
+mod large_forest;
+#[cfg(feature = "concurrent")]
+pub use large_forest::MemoryStorage as ForestMemoryStorage;
+#[cfg(feature = "rocksdb")]
+pub use large_forest::RocksDBStorage;
+pub use large_forest::{
+    HistoryError, LargeSmtForest, LargeSmtForestError, Storage as ForestStorage, StorageError,
+};
 
 mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
@@ -33,6 +42,7 @@ mod partial;
 pub use partial::PartialSmt;
 
 mod forest;
+
 pub use forest::SmtForest;
 
 // CONSTANTS
