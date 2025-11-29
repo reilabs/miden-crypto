@@ -15,7 +15,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
 //! let smt = LargeSmt::new(storage)?; // reconstructs in-memory top if data exists
-//! let _root = smt.root()?;
+//! let _root = smt.root();
 //! # Ok(())
 //! # }
 //! ```
@@ -161,7 +161,9 @@ mod subtree;
 pub use subtree::{Subtree, SubtreeError};
 
 mod storage;
-pub use storage::{MemoryStorage, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates};
+pub use storage::{
+    MemoryStorage, SmtStorage, StorageError, StorageUpdateParts, StorageUpdates, SubtreeUpdate,
+};
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbStorage};
 
@@ -180,6 +182,9 @@ const IN_MEMORY_DEPTH: u8 = 24;
 
 /// Number of nodes that are stored in memory (including the unused index 0)
 const NUM_IN_MEMORY_NODES: usize = 1 << (IN_MEMORY_DEPTH + 1);
+
+/// Index of the root node inside `in_memory_nodes`.
+pub(super) const ROOT_MEMORY_INDEX: usize = 1;
 
 /// Number of subtree levels below in-memory depth (24-64 in steps of 8)
 const NUM_SUBTREE_LEVELS: usize = 5;
@@ -209,17 +214,6 @@ type LoadedLeaves = (Vec<u64>, Map<u64, Option<SmtLeaf>>);
 /// - `isize`: Entry count delta
 type MutatedLeaves = (MutatedSubtreeLeaves, Map<u64, SmtLeaf>, Map<Word, Word>, isize, isize);
 
-/// Represents a storage update for a subtree after processing mutations.
-#[derive(Debug)]
-enum SubtreeUpdate {
-    /// No storage update needed (in-memory or unchanged).
-    None,
-    /// Store the modified subtree at the given index.
-    Store { index: NodeIndex, subtree: Subtree },
-    /// Delete the subtree at the given index (became empty).
-    Delete { index: NodeIndex },
-}
-
 // LargeSmt
 // ================================================================================================
 
@@ -241,6 +235,11 @@ enum SubtreeUpdate {
 /// The tree structure:
 /// - Depths 0-23: Stored in memory as a flat array for fast access
 /// - Depths 24-64: Stored in external storage organized as subtrees for efficient batch operations
+///
+/// `LargeSmt` does **not** implement [`Clone`]. Copying an instance would only duplicate the
+/// in-memory nodes while continuing to share the storage backend, which is misleading. If you need
+/// to share an instance between threads or components, wrap it in an
+/// [`Arc`](alloc::sync::Arc) explicitly so the ownership semantics are clear.
 #[derive(Debug)]
 pub struct LargeSmt<S: SmtStorage> {
     storage: S,
@@ -268,8 +267,8 @@ impl<S: SmtStorage> LargeSmt<S> {
     }
 
     /// Returns the root of the tree
-    pub fn root(&self) -> Result<Word, LargeSmtError> {
-        Ok(self.storage.get_root()?.unwrap_or(Self::EMPTY_ROOT))
+    pub fn root(&self) -> Word {
+        self.in_memory_nodes[ROOT_MEMORY_INDEX]
     }
 
     /// Returns the number of non-empty leaves in this tree.
@@ -440,15 +439,10 @@ impl<S: SmtStorage> PartialEq for LargeSmt<S> {
     /// storage contents. Two SMTs with the same root should be cryptographically
     /// equivalent, but this doesn't verify the storage backends are identical.
     fn eq(&self, other: &Self) -> bool {
-        self.root().unwrap() == other.root().unwrap()
+        self.root() == other.root()
             && self.num_leaves().unwrap() == other.num_leaves().unwrap()
             && self.num_entries().unwrap() == other.num_entries().unwrap()
     }
 }
 
 impl<S: SmtStorage> Eq for LargeSmt<S> {}
-
-// Note: Clone is intentionally not implemented for LargeSmt because:
-// 1. Cloning would only clone the in-memory portion and share storage via Arc
-// 2. This doesn't actually clone the underlying disk data, which is misleading
-// 3. Users should be explicit about sharing LargeSmt instances via Arc if needed

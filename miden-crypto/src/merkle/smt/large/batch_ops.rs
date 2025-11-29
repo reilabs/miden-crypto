@@ -5,8 +5,8 @@ use num::Integer;
 use rayon::prelude::*;
 
 use super::{
-    IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LoadedLeaves, MutatedLeaves, SMT_DEPTH, SmtStorage,
-    StorageUpdates, Subtree, SubtreeUpdate,
+    IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LoadedLeaves, MutatedLeaves, ROOT_MEMORY_INDEX,
+    SMT_DEPTH, SmtStorage, StorageUpdates, Subtree, SubtreeUpdate,
 };
 use crate::{
     Word,
@@ -40,12 +40,12 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Processes one set of `subtree_leaves` at a given `subtree_root_depth` and returns:
     /// - node mutations to apply to in-memory nodes (empty if handled in subtree),
     /// - the computed subtree root leaf, and
-    /// - a storage update instruction for the subtree.
+    /// - an optional storage update instruction for the subtree.
     fn process_subtree_for_depth(
         &self,
         subtree_leaves: Vec<SubtreeLeaf>,
         subtree_root_depth: u8,
-    ) -> (NodeMutations, SubtreeLeaf, SubtreeUpdate) {
+    ) -> (NodeMutations, SubtreeLeaf, Option<SubtreeUpdate>) {
         debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
 
         let subtree_root_index =
@@ -73,7 +73,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let (in_memory_mutations, subtree_update) = if subtree_root_depth < IN_MEMORY_DEPTH {
             // In-memory nodes: return mutations for direct application
-            (mutations, SubtreeUpdate::None)
+            (mutations, None)
         } else {
             // Storage nodes: apply mutations to loaded subtree and determine storage action
             let modified = !mutations.is_empty();
@@ -91,13 +91,13 @@ impl<S: SmtStorage> LargeSmt<S> {
             }
 
             let update = if !modified {
-                SubtreeUpdate::None
+                None
             } else if let Some(subtree) = subtree_opt
                 && !subtree.is_empty()
             {
-                SubtreeUpdate::Store { index: subtree_root_index, subtree }
+                Some(SubtreeUpdate::Store { index: subtree_root_index, subtree })
             } else {
-                SubtreeUpdate::Delete { index: subtree_root_index }
+                Some(SubtreeUpdate::Delete { index: subtree_root_index })
             };
 
             (NodeMutations::default(), update)
@@ -352,12 +352,12 @@ impl<S: SmtStorage> LargeSmt<S> {
             self.sorted_pairs_to_mutated_leaves_with_preloaded_leaves(sorted_kv_pairs, &leaf_map);
 
         // Early return if no mutations
-        let old_root = self.root()?;
         if leaves.is_empty() {
-            return Ok(old_root);
+            return Ok(self.root());
         }
 
-        let mut loaded_subtrees: Map<NodeIndex, Option<Subtree>> = Map::new();
+        // Pre-allocate capacity for subtree updates.
+        let mut subtree_updates: Vec<SubtreeUpdate> = Vec::with_capacity(leaves.len());
 
         // Process each depth level in reverse, stepping by the subtree depth
         for subtree_root_depth in
@@ -389,8 +389,8 @@ impl<S: SmtStorage> LargeSmt<S> {
                     |(mut muts, mut roots, mut subtrees), (mem_muts, root, subtree_update)| {
                         muts.extend(mem_muts);
                         roots.push(root);
-                        if !matches!(subtree_update, SubtreeUpdate::None) {
-                            subtrees.push(subtree_update);
+                        if let Some(update) = subtree_update {
+                            subtrees.push(update);
                         }
                         (muts, roots, subtrees)
                     },
@@ -413,18 +413,8 @@ impl<S: SmtStorage> LargeSmt<S> {
                 };
             }
 
-            // Convert SubtreeUpdate to storage format
-            for update in modified_subtrees {
-                match update {
-                    SubtreeUpdate::None => {},
-                    SubtreeUpdate::Store { index, subtree } => {
-                        loaded_subtrees.insert(index, Some(subtree));
-                    },
-                    SubtreeUpdate::Delete { index } => {
-                        loaded_subtrees.insert(index, None);
-                    },
-                }
-            }
+            // Collect modified subtrees directly into the updates vector.
+            subtree_updates.extend(modified_subtrees);
 
             // Prepare leaves for the next depth level
             leaves = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
@@ -433,6 +423,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         }
 
         let new_root = leaves[0][0].hash;
+        self.in_memory_nodes[ROOT_MEMORY_INDEX] = new_root;
 
         // Build leaf updates for storage (convert Empty to None for deletion)
         let mut leaf_update_map = leaf_map;
@@ -449,7 +440,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         // Atomic update to storage
         let updates = StorageUpdates::from_parts(
             leaf_update_map,
-            loaded_subtrees,
+            subtree_updates,
             new_root,
             leaf_count_delta,
             entry_count_delta,
@@ -554,6 +545,9 @@ impl<S: SmtStorage> LargeSmt<S> {
             mut leaf_map,
         } = prepared;
 
+        // Update the root in memory
+        self.in_memory_nodes[ROOT_MEMORY_INDEX] = new_root;
+
         // Process node mutations
         for (index, mutation) in sorted_node_mutations {
             if index.depth() < IN_MEMORY_DEPTH {
@@ -636,7 +630,10 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let updates = StorageUpdates::from_parts(
             leaf_map,
-            loaded_subtrees,
+            loaded_subtrees.into_iter().map(|(index, subtree_opt)| match subtree_opt {
+                Some(subtree) => SubtreeUpdate::Store { index, subtree },
+                None => SubtreeUpdate::Delete { index },
+            }),
             new_root,
             leaf_count_delta,
             entry_count_delta,
@@ -663,7 +660,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// let mutations = smt.compute_mutations(vec![pair]).expect("compute_mutations ok");
     /// assert_eq!(mutations.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
     /// smt.apply_mutations(mutations);
-    /// assert_eq!(smt.root().unwrap(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+    /// assert_eq!(smt.root(), *EmptySubtreeRoots::entry(SMT_DEPTH, 0));
     /// ```
     pub fn compute_mutations(
         &self,
