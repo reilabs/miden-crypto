@@ -122,7 +122,7 @@ impl SmtForest {
     /// the root computed from the proof.
     ///
     /// If the computed root already exists, returns without modifying the forest.
-    pub fn insert_path(&mut self, proof: SmtProof) -> Word {
+    pub fn insert_proof(&mut self, proof: SmtProof) -> Word {
         let root = proof.compute_root();
         let path_nodes: Vec<_> = proof.authenticated_nodes().collect();
         let (_path, leaf) = proof.into_parts();

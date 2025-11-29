@@ -93,19 +93,32 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
 }
 
 #[test]
-fn test_insert_path() -> Result<(), MerkleError> {
-    let mut smt = Smt::new();
-    let key = Word::new([ZERO, ZERO, ZERO, ONE]);
-    let value = Word::new([ONE; WORD_SIZE]);
-    smt.insert(key, value)?;
-    let proof = smt.open(&key);
+fn test_insert_proof() -> Result<(), MerkleError> {
+    // Create an SMT with multiple entries to test partial forest view
+    let key1 = Word::new([ZERO, ZERO, ZERO, ONE]);
+    let value1 = Word::new([ONE; WORD_SIZE]);
+
+    let key2 = Word::new([ZERO, ZERO, ONE, ZERO]);
+    let value2 = Word::new([ONE; WORD_SIZE]);
+
+    let key3 = Word::new([ZERO, ONE, ZERO, Felt::new(2)]);
+    let value3 = Word::new([ONE; WORD_SIZE]);
+
+    let smt = Smt::with_entries(vec![(key1, value1), (key2, value2), (key3, value3)])?;
+    let proof = smt.open(&key1);
 
     let mut forest = SmtForest::new();
-    let root = forest.insert_path(proof);
+    let root = forest.insert_proof(proof);
     assert_eq!(root, smt.root());
 
-    let stored_proof = forest.open(root, key)?;
-    assert!(stored_proof.verify_membership(&key, &value, &root));
+    // key1 should be accessible as we inserted its proof
+    let stored_proof = forest.open(root, key1)?;
+    assert!(stored_proof.verify_membership(&key1, &value1, &root));
+
+    // key2 path is available, but the key is not tracked in the forest.
+    assert_matches!(forest.open(root, key2), Err(MerkleError::UntrackedKey(_)));
+    // key3 path is not available in the forest.
+    assert_matches!(forest.open(root, key3), Err(MerkleError::NodeIndexNotFoundInStore(_, _)));
 
     forest.pop_smts(vec![root]);
     assert!(forest.roots.is_empty());
