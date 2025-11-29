@@ -13,6 +13,9 @@ use crate::{
 // TESTS
 // ================================================================================================
 
+// Number of nodes in an empty forest.
+const EMPTY_NODE_COUNT: usize = SMT_DEPTH as usize;
+
 #[test]
 fn test_insert_root_not_in_store() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
@@ -108,6 +111,7 @@ fn test_insert_proof() -> Result<(), MerkleError> {
     let proof = smt.open(&key1);
 
     let mut forest = SmtForest::new();
+    assert_eq!(forest.store.num_nodes(), EMPTY_NODE_COUNT);
     let root = forest.insert_proof(proof);
     assert_eq!(root, smt.root());
 
@@ -121,6 +125,7 @@ fn test_insert_proof() -> Result<(), MerkleError> {
     assert_matches!(forest.open(root, key3), Err(MerkleError::NodeIndexNotFoundInStore(_, _)));
 
     forest.pop_smts(vec![root]);
+    assert_eq!(forest.store.num_nodes(), EMPTY_NODE_COUNT);
     assert!(forest.roots.is_empty());
     assert!(forest.leaves.is_empty());
 

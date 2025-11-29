@@ -49,6 +49,11 @@ impl SmtStore {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
+    #[cfg(test)]
+    pub(super) fn num_nodes(&self) -> usize {
+        self.nodes.len()
+    }
+
     /// Returns the node at `index` rooted on the tree `root`.
     ///
     /// # Errors
@@ -283,6 +288,8 @@ impl SmtStore {
 
         let left = smt_node.left;
         let right = smt_node.right;
+
+        self.nodes.remove(&node);
 
         let mut result = Vec::new();
         result.extend(self.remove_node(left));
