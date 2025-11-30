@@ -1,3 +1,5 @@
+## 0.20.0 (TBD)
+
 ## 0.19.0 (2025-11-30)
 
 - Added `LargeSmt::insert_batch()` for optimized bulk operations ([#597](https://github.com/0xMiden/crypto/issues/597)).
