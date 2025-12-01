@@ -3,12 +3,12 @@
 
 use thiserror::Error;
 
-use crate::merkle::{MerkleError, smt::history::error::HistoryError};
+use crate::merkle::{
+    MerkleError,
+    smt::{history::error::HistoryError, large_forest::storage},
+};
 
-/// The errors returned by operations on the large SMT forest.
-///
-/// This type primarily serves to wrap more specific error types from various subsystems into a
-/// generic interface type.
+/// The type of errors returned by operations on the large SMT forest.
 #[derive(Debug, Error)]
 pub enum LargeSmtForestError {
     #[error(transparent)]
@@ -16,6 +16,11 @@ pub enum LargeSmtForestError {
 
     #[error(transparent)]
     MerkleError(#[from] MerkleError),
+
+    #[error(transparent)]
+    StorageError(#[from] storage::StorageError),
 }
 
-pub mod history {}
+/// The result type for use within the large SMT forest portion of the library.
+#[allow(dead_code)] // Temporary: this is code being merged incrementally
+pub type Result<T> = std::result::Result<T, LargeSmtForestError>;
