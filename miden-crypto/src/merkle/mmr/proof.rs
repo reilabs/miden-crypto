@@ -82,6 +82,22 @@ impl MmrProof {
         self.leaf
     }
 
+    /// Returns the state of the MMR when the proof was created.
+    pub fn forest(&self) -> Forest {
+        self.path.forest()
+    }
+
+    /// Returns the position of the leaf value within the MMR.
+    pub fn position(&self) -> usize {
+        self.path.position()
+    }
+
+    /// Returns the Merkle opening, starting from the value's sibling up to and excluding the root
+    /// of the responsible tree.
+    pub fn merkle_path(&self) -> &MerklePath {
+        self.path.merkle_path()
+    }
+
     /// Converts the leaf global position into a local position that can be used to verify the
     /// merkle_path.
     pub fn relative_pos(&self) -> usize {
