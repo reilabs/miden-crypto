@@ -1,6 +1,7 @@
 ## 0.20.0 (TBD)
 
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
+- Added `Added SmtProof::verify_non_membership()` and `SmtProof::is_key_valid()` to make SMT membership/non‑membership checks clearer ([#682](https://github.com/0xMiden/crypto/pull/682)).
 
 ## 0.19.0 (2025-11-30)
 
