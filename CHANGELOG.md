@@ -1,4 +1,6 @@
-## 0.19.0 (TBD)
+## 0.20.0 (TBD)
+
+## 0.19.0 (2025-11-30)
 
 - Added `LargeSmt::insert_batch()` for optimized bulk operations ([#597](https://github.com/0xMiden/crypto/issues/597)).
 - Added `compute_challenge_k()` and `verify_with_unchecked_k()` methods to separate hashing and EC logic in EdDSA over Ed25519 ([#602](https://github.com/0xMiden/crypto/pull/602)).
