@@ -1,6 +1,7 @@
 ## 0.20.0 (TBD)
 
 - [BREAKING] Rename `MmrProof` to `MmrPath`, and introduce a new `MmrProof` with the leaf value included ([#656](https://github.com/0xMiden/crypto/pull/656)).
+- Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
 
 ## 0.19.0 (2025-11-30)
 
