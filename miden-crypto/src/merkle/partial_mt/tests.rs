@@ -94,10 +94,7 @@ fn err_with_leaves() {
 #[test]
 fn err_with_leaves_entry_is_not_leaf() {
     // NODE21 (depth 2, value 1) is the parent of NODE32 and NODE33 (depth 3, values 2-3)
-    let leaf_nodes_vec = vec![
-        (NODE21, int_to_node(21)),
-        (NODE32, int_to_node(32)),
-    ];
+    let leaf_nodes_vec = vec![(NODE21, int_to_node(21)), (NODE32, int_to_node(32))];
 
     let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
 

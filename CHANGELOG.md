@@ -1,6 +1,7 @@
 ## 0.20.0 (TBD)
 
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
+- Added validation to `PartialMerkleTree::with_leaves()` to reject internal nodes ([#684](https://github.com/0xMiden/crypto/pull/684)).
 
 ## 0.19.0 (2025-11-30)
 
