@@ -1,7 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use super::{
-    super::{MerkleTree, NodeIndex, PartialMerkleTree, int_to_node, store::MerkleStore},
+    super::{
+        MerkleError, MerkleTree, NodeIndex, PartialMerkleTree, int_to_node, store::MerkleStore,
+    },
     Deserializable, InnerNodeInfo, MerkleProof, Serializable, Word,
 };
 
@@ -85,6 +87,27 @@ fn err_with_leaves() {
     let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
 
     assert!(PartialMerkleTree::with_leaves(leaf_nodes).is_err());
+}
+
+/// Tests that `with_leaves()` returns `EntryIsNotLeaf` error when an entry
+/// is an ancestor of another entry.
+#[test]
+fn err_with_leaves_entry_is_not_leaf() {
+    // NODE21 (depth 2, value 1) is the parent of NODE32 and NODE33 (depth 3, values 2-3)
+    let leaf_nodes_vec = vec![
+        (NODE21, int_to_node(21)),
+        (NODE32, int_to_node(32)),
+    ];
+
+    let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
+
+    match PartialMerkleTree::with_leaves(leaf_nodes) {
+        Err(MerkleError::EntryIsNotLeaf { node, descendant }) => {
+            assert_eq!(node, NODE21, "Expected NODE21 as the non-leaf");
+            assert_eq!(descendant, NODE32, "Expected NODE32 as descendant");
+        },
+        other => panic!("Expected EntryIsNotLeaf error, got {:?}", other),
+    }
 }
 
 /// Checks that root returned by `root()` function is equal to the expected one.

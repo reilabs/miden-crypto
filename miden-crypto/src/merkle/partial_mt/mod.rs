@@ -91,7 +91,43 @@ impl PartialMerkleTree {
     /// - If the depth is 0 or is greater than 64.
     /// - The number of entries exceeds the maximum tree capacity, that is 2^{depth}.
     /// - The provided entries contain an insufficient set of nodes.
+    /// - Any entry is an ancestor of another entry (creates hash ambiguity).
     pub fn with_leaves<R, I>(entries: R) -> Result<Self, MerkleError>
+    where
+        R: IntoIterator<IntoIter = I>,
+        I: Iterator<Item = (NodeIndex, Word)> + ExactSizeIterator,
+    {
+        let entries: Vec<_> = entries.into_iter().collect();
+
+        // Validate that no entry is an ancestor of another entry.
+        // This prevents ambiguity: if we provide both a parent and its child,
+        // should we use the provided parent hash or compute it from the child?
+        //
+        // Algorithm: Put all provided nodes in a set, then for each node walk up toward
+        // the root checking if any ancestor is also in the set.
+        let provided_nodes: BTreeSet<NodeIndex> = entries.iter().map(|(node, _)| *node).collect();
+
+        for (node, _) in &entries {
+            let mut current = *node;
+            while !current.is_root() {
+                current = current.parent();
+                if provided_nodes.contains(&current) {
+                    return Err(MerkleError::EntryIsNotLeaf { node: current, descendant: *node });
+                }
+            }
+        }
+
+        Self::with_leaves_internal(entries)
+    }
+
+    /// Internal method that skips ancestor validation.
+    /// Used by deserialization where the data was already validated when originally created.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - If the depth is 0 or is greater than 64.
+    /// - The provided entries contain an insufficient set of nodes.
+    fn with_leaves_internal<R, I>(entries: R) -> Result<Self, MerkleError>
     where
         R: IntoIterator<IntoIter = I>,
         I: Iterator<Item = (NodeIndex, Word)> + ExactSizeIterator,
@@ -469,7 +505,7 @@ impl Deserializable for PartialMerkleTree {
             leaf_nodes.push((index, hash));
         }
 
-        let pmt = PartialMerkleTree::with_leaves(leaf_nodes).map_err(|_| {
+        let pmt = PartialMerkleTree::with_leaves_internal(leaf_nodes).map_err(|_| {
             DeserializationError::InvalidValue("Invalid data for PartialMerkleTree creation".into())
         })?;
 
