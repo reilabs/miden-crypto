@@ -1,8 +1,7 @@
 use alloc::string::ToString;
 
-use super::{LeafIndex, SMT_DEPTH, SmtLeaf, SmtProofError, SparseMerklePath, Word};
+use super::{SMT_DEPTH, SmtLeaf, SmtProofError, SparseMerklePath, Word};
 use crate::{
-    EMPTY_WORD,
     merkle::InnerNodeInfo,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -48,62 +47,57 @@ impl SmtProof {
     // PROOF VERIFIER
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if a [`super::Smt`] with the specified root contains the provided
-    /// key-value pair.
+    /// Verifies that a [`super::Smt`] with the specified root contains the provided key-value pair.
     ///
-    /// This method can also be used to verify non-membership by passing `EMPTY_WORD` as the value,
-    /// though [`Self::verify_non_membership()`] is preferred for clarity.
-    ///
-    /// Note: if false is returned, it could mean either:
-    /// - The value at this key doesn't match the provided value, or
-    /// - The proof is for a different leaf index than the one the key maps to.
-    pub fn verify_membership(&self, key: &Word, value: &Word, root: &Word) -> bool {
-        let maybe_value_in_leaf = self.leaf.get_value(key);
+    /// # Errors
+    /// - [`SmtProofError::InvalidKeyForProof`] if the key maps to a different leaf index than this
+    ///   proof's leaf.
+    /// - [`SmtProofError::ValueMismatch`] if the value doesn't match the value in the leaf.
+    /// - [`SmtProofError::ConflictingRoots`] if the computed root doesn't match the expected root.
+    pub fn verify_membership(
+        &self,
+        key: &Word,
+        value: &Word,
+        root: &Word,
+    ) -> Result<(), SmtProofError> {
+        let value_in_leaf = self.leaf.get_value(key).ok_or(SmtProofError::InvalidKeyForProof)?;
 
-        match maybe_value_in_leaf {
-            Some(value_in_leaf) => {
-                // The value must match for the proof to be valid
-                if value_in_leaf != *value {
-                    return false;
-                }
-
-                // make sure the Merkle path resolves to the correct root
-                self.compute_root() == *root
-            },
-            // If the key maps to a different leaf, the proof cannot verify membership of `value`
-            None => false,
+        // Check root before value so that ValueMismatch implies the proof is valid
+        let computed_root = self.compute_root();
+        if computed_root != *root {
+            return Err(SmtProofError::ConflictingRoots {
+                expected_root: *root,
+                actual_root: computed_root,
+            });
         }
+
+        if value_in_leaf != *value {
+            return Err(SmtProofError::ValueMismatch { expected: *value, actual: value_in_leaf });
+        }
+
+        Ok(())
     }
 
-    /// Returns true if a [`super::Smt`] with the specified root does not contain any value
+    /// Verifies that a [`super::Smt`] with the specified root does not contain any value
     /// for the provided key.
     ///
     /// This is equivalent to calling `verify_membership(key, &EMPTY_WORD, root)`, but makes
-    /// the intent clearer and is more convenient to use.
-    pub fn verify_non_membership(&self, key: &Word, root: &Word) -> bool {
-        self.verify_membership(key, &EMPTY_WORD, root)
-    }
-
-    /// Returns true if the provided key maps to the same leaf index as this proof's leaf.
+    /// the intent clearer.
     ///
-    /// This can be used to check whether a proof is valid for a given key before calling
-    /// [`Self::verify_membership()`] or [`Self::verify_non_membership()`].
-    ///
-    /// If this returns false, then [`Self::get()`] will return `None`, and both
-    /// [`Self::verify_membership()`] and [`Self::verify_non_membership()`] will return false
-    /// for this key.
-    pub fn is_key_valid(&self, key: &Word) -> bool {
-        self.leaf.index() == LeafIndex::<SMT_DEPTH>::from(*key)
+    /// # Errors
+    /// - [`SmtProofError::InvalidKeyForProof`] if the key maps to a different leaf index than this
+    ///   proof's leaf.
+    /// - [`SmtProofError::ValueMismatch`] if the key has a value in the tree (i.e., is not empty).
+    /// - [`SmtProofError::ConflictingRoots`] if the computed root doesn't match the expected root.
+    pub fn verify_non_membership(&self, key: &Word, root: &Word) -> Result<(), SmtProofError> {
+        self.verify_membership(key, &super::EMPTY_WORD, root)
     }
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the value associated with the specific key according to this proof.
-    ///
-    /// - Returns `None` if the key maps to a different leaf index than this proof's leaf.
-    /// - Returns `Some(value)` if the key maps to this leaf index, where `value` is either the
-    ///   stored value or `EMPTY_WORD` if the key has no entry in this leaf.
+    /// Returns the value associated with the specific key according to this proof, or None if
+    /// this proof does not contain a value for the specified key.
     ///
     /// A key-value pair generated by using this method should pass the `verify_membership()` check.
     pub fn get(&self, key: &Word) -> Option<Word> {

@@ -8,7 +8,8 @@ use crate::{
     merkle::{
         EmptySubtreeRoots,
         smt::{
-            Map, MutationSet, NodeMutation, SmtLeafError, SparseMerkleTree, full::MAX_LEAF_ENTRIES,
+            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
+            full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },
@@ -762,126 +763,131 @@ fn test_max_leaf_entries_validation() {
     );
 }
 
-/// Tests that `verify_non_membership()` correctly verifies that a key is not in the tree.
+/// Tests that verify_membership returns InvalidKeyForProof when key maps to different leaf index
 #[test]
-fn test_smt_proof_verify_non_membership() {
-    let key_1 = Word::from([ONE, ONE, ONE, ONE]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
+fn test_smt_proof_error_invalid_key_for_proof() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    let smt = Smt::with_entries([(key_1, value_1)]).unwrap();
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
     let root = smt.root();
 
-    // A key that maps to the same leaf but doesn't exist in the tree
-    let key_absent_same_leaf = Word::from([2_u32.into(), 2_u32.into(), 2_u32.into(), ONE]);
+    // Use a key that maps to a different leaf index (different most significant felt)
+    let different_index_key = Word::from([ONE, ONE, ONE, Felt::new(999)]);
 
-    let proof = smt.open(&key_absent_same_leaf);
-
-    // verify_non_membership should return true for a key that doesn't exist
-    assert!(
-        proof.verify_non_membership(&key_absent_same_leaf, &root),
-        "verify_non_membership should return true for absent key"
-    );
-
-    // verify_non_membership should return false for a key that exists
-    let proof_existing = smt.open(&key_1);
-    assert!(
-        !proof_existing.verify_non_membership(&key_1, &root),
-        "verify_non_membership should return false for existing key"
+    assert_matches!(
+        proof.verify_membership(&different_index_key, &value, &root),
+        Err(SmtProofError::InvalidKeyForProof)
     );
 }
 
-/// Tests that `is_key_valid()` correctly identifies whether a key maps to the proof's leaf.
+/// Tests that verify_membership returns ValueMismatch when value doesn't match
 #[test]
-fn test_smt_proof_is_key_valid() {
-    let key_1 = Word::from([ONE, ONE, ONE, ONE]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
+fn test_smt_proof_error_value_mismatch() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    let smt = Smt::with_entries([(key_1, value_1)]).unwrap();
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
+    let root = smt.root();
 
-    let proof = smt.open(&key_1);
+    // Use the correct key but wrong value
+    let wrong_value = Word::new([Felt::new(999); WORD_SIZE]);
 
-    // Key that maps to the same leaf (same most significant felt)
-    let key_same_leaf = Word::from([2_u32.into(), 2_u32.into(), 2_u32.into(), ONE]);
-    assert!(
-        proof.is_key_valid(&key_same_leaf),
-        "is_key_valid should return true for key mapping to same leaf"
-    );
-
-    // Key that maps to a different leaf (different most significant felt)
-    let key_different_leaf = Word::from([ONE, ONE, ONE, 2_u32.into()]);
-    assert!(
-        !proof.is_key_valid(&key_different_leaf),
-        "is_key_valid should return false for key mapping to different leaf"
+    assert_matches!(
+        proof.verify_membership(&key, &wrong_value, &root),
+        Err(SmtProofError::ValueMismatch { expected, actual })
+            if expected == wrong_value && actual == value
     );
 }
 
-/// Tests that `verify_membership()` with EMPTY_WORD is equivalent to `verify_non_membership()`.
+/// Tests that verify_membership returns ConflictingRoots when root doesn't match
 #[test]
-fn test_smt_proof_verify_membership_with_empty_word() {
-    let key_1 = Word::from([ONE, ONE, ONE, ONE]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
+fn test_smt_proof_error_conflicting_roots() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    let smt = Smt::with_entries([(key_1, value_1)]).unwrap();
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
+    let actual_root = smt.root();
+
+    // Use a completely wrong root
+    let wrong_root = Word::new([Felt::new(999); WORD_SIZE]);
+
+    assert_matches!(
+        proof.verify_membership(&key, &value, &wrong_root),
+        Err(SmtProofError::ConflictingRoots { expected_root, actual_root: got_root })
+            if expected_root == wrong_root && got_root == actual_root
+    );
+}
+
+/// Tests that verify_non_membership returns Ok for keys with no value
+#[test]
+fn test_smt_proof_verify_non_membership_success() {
+    // Use an empty tree where no keys have values
+    let smt = Smt::default();
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let proof = smt.open(&key);
     let root = smt.root();
 
-    // A key that maps to the same leaf but doesn't exist in the tree
-    let key_absent = Word::from([2_u32.into(), 2_u32.into(), 2_u32.into(), ONE]);
+    // This key has no value in the empty tree
+    proof.verify_non_membership(&key, &root).unwrap();
+}
 
-    let proof = smt.open(&key_absent);
+/// Tests that verify_non_membership returns ValueMismatch when key has a value
+#[test]
+fn test_smt_proof_verify_non_membership_fails_when_value_exists() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    // verify_membership with EMPTY_WORD should be equivalent to verify_non_membership
-    assert_eq!(
-        proof.verify_membership(&key_absent, &EMPTY_WORD, &root),
-        proof.verify_non_membership(&key_absent, &root),
-        "verify_membership with EMPTY_WORD should equal verify_non_membership"
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
+    let root = smt.root();
+
+    // Key has a value, so non-membership should fail
+    assert_matches!(
+        proof.verify_non_membership(&key, &root),
+        Err(SmtProofError::ValueMismatch { .. })
     );
 }
 
 /// Tests that `get()` returns None for keys that don't map to the proof's leaf index.
 #[test]
 fn test_smt_proof_get_returns_none_for_different_leaf() {
-    let key_1 = Word::from([ONE, ONE, ONE, ONE]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    let smt = Smt::with_entries([(key_1, value_1)]).unwrap();
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
 
-    let proof = smt.open(&key_1);
-
-    // Key that maps to a different leaf
-    let key_different_leaf = Word::from([ONE, ONE, ONE, 2_u32.into()]);
+    // Key that maps to a different leaf index
+    let different_leaf_key = Word::from([ONE, ONE, ONE, Felt::new(999)]);
 
     assert!(
-        proof.get(&key_different_leaf).is_none(),
+        proof.get(&different_leaf_key).is_none(),
         "get() should return None for key mapping to different leaf"
-    );
-    assert!(
-        !proof.is_key_valid(&key_different_leaf),
-        "is_key_valid should return false for key mapping to different leaf"
     );
 }
 
 /// Tests that `get()` returns EMPTY_WORD for keys that map to the proof's leaf but don't exist.
 #[test]
 fn test_smt_proof_get_returns_empty_for_absent_key_same_leaf() {
-    let key_1 = Word::from([ONE, ONE, ONE, ONE]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
 
-    let smt = Smt::with_entries([(key_1, value_1)]).unwrap();
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
 
-    let proof = smt.open(&key_1);
+    // Key that maps to the same leaf but doesn't exist (same most significant felt)
+    let absent_key_same_leaf =
+        Word::from([2_u32.into(), 2_u32.into(), 2_u32.into(), Felt::new(42)]);
 
-    // Key that maps to the same leaf but doesn't exist
-    let key_absent_same_leaf = Word::from([2_u32.into(), 2_u32.into(), 2_u32.into(), ONE]);
-
-    let result = proof.get(&key_absent_same_leaf);
+    let result = proof.get(&absent_key_same_leaf);
     assert_eq!(
         result,
         Some(EMPTY_WORD),
         "get() should return Some(EMPTY_WORD) for absent key mapping to same leaf"
-    );
-    assert!(
-        proof.is_key_valid(&key_absent_same_leaf),
-        "is_key_valid should return true for key mapping to same leaf"
     );
 }
 
