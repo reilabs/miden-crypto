@@ -27,9 +27,11 @@ pub use large::{
 pub use large::{RocksDbConfig, RocksDbStorage};
 #[cfg(feature = "concurrent")]
 mod large_forest;
+
 #[cfg(feature = "concurrent")]
 pub use large_forest::{
-    LargeSmtForestError, NumLevels, Storage as ForestStorage, StorageError, StoredTreeHandle,
+    LargeSmtForest, LargeSmtForestError, Storage as ForestStorage, StorageError, StoredTreeHandle,
+    SubtreeLevels,
 };
 
 mod simple;

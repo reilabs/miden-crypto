@@ -23,9 +23,10 @@ use crate::{
     Word,
     merkle::{
         NodeIndex,
-        smt::{InnerNode, SmtLeaf, Subtree, large_forest::utils::NumLevels},
+        smt::{InnerNode, SmtLeaf, Subtree, large_forest::utils::SubtreeLevels},
     },
 };
+
 // STORAGE TRAIT
 // ================================================================================================
 
@@ -111,8 +112,8 @@ where
     /// Returns the number of levels in each tree that are guaranteed to be stored in memory, and
     /// hence that are **not managed by the storage** itself.
     ///
-    /// Please see the documentation of [`NumLevels`] for the exact way these are counted.
-    fn in_memory_depth(&self) -> Result<NumLevels>;
+    /// Please see the documentation of [`SubtreeLevels`] for the exact way these are counted.
+    fn in_memory_depth(&self) -> Result<SubtreeLevels>;
 
     /// Returns the number of unique trees that have had data stored within the storage.
     fn tree_count(&self) -> Result<usize>;
