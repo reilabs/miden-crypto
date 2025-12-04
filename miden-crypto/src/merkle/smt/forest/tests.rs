@@ -120,7 +120,7 @@ fn test_batch_insert() -> Result<(), MerkleError> {
 
         for (key, value) in values {
             let proof = forest.open(new_root, key).unwrap();
-            proof.verify_membership(&key, &value, &new_root).unwrap();
+            proof.verify_presence(&key, &value, &new_root).unwrap();
         }
     });
 
@@ -164,7 +164,7 @@ fn test_open_root_in_store() -> Result<(), MerkleError> {
     let proof =
         forest.open(root, Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(2)]))?;
     proof
-        .verify_membership(
+        .verify_presence(
             &Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(2)]),
             &int_to_node(3),
             &root,
@@ -201,28 +201,28 @@ fn test_multiple_versions_of_same_key() -> Result<(), MerkleError> {
     // Open proofs for each historical root and verify them
     let proof1 = forest.open(root1, key)?;
     proof1
-        .verify_membership(&key, &value1, &root1)
+        .verify_presence(&key, &value1, &root1)
         .expect("Proof for root1 should verify with value1");
 
     let proof2 = forest.open(root2, key)?;
     proof2
-        .verify_membership(&key, &value2, &root2)
+        .verify_presence(&key, &value2, &root2)
         .expect("Proof for root2 should verify with value2");
 
     let proof3 = forest.open(root3, key)?;
     proof3
-        .verify_membership(&key, &value3, &root3)
+        .verify_presence(&key, &value3, &root3)
         .expect("Proof for root3 should verify with value3");
 
     // Wrong values cannot be verified - should return ValueMismatch
     assert_matches!(
-        proof1.verify_membership(&key, &value2, &root1),
+        proof1.verify_presence(&key, &value2, &root1),
         Err(SmtProofError::ValueMismatch { .. }),
         "Proof for root1 should not verify with value2"
     );
 
     assert_matches!(
-        proof3.verify_membership(&key, &value1, &root3),
+        proof3.verify_presence(&key, &value1, &root3),
         Err(SmtProofError::ValueMismatch { .. }),
         "Proof for root3 should not verify with value1"
     );

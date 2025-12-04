@@ -67,4 +67,8 @@ pub enum SmtProofError {
     /// The computed root does not match the expected root.
     #[error("expected merkle root {expected_root} found {actual_root}")]
     ConflictingRoots { expected_root: Word, actual_root: Word },
+
+    /// The key-value pair exists in the tree.
+    #[error("key-value pair exists in the tree: key {key}, value {value}")]
+    ValuePresent { key: Word, value: Word },
 }

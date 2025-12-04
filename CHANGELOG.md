@@ -1,7 +1,7 @@
 ## 0.20.0 (TBD)
 
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
-- [BREAKING] Changed `SmtProof::verify_membership()` to return `Result<(), SmtProofError>` and added `verify_non_membership()` ([#682](https://github.com/0xMiden/crypto/pull/682)).
+- [BREAKING] Refactored `SmtProof` verification API to return `Result<(), SmtProofError>` ([#682](https://github.com/0xMiden/crypto/pull/682)).
 - Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
 
 ## 0.19.1 (2025-12-04)

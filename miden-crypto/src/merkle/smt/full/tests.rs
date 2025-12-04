@@ -763,7 +763,7 @@ fn test_max_leaf_entries_validation() {
     );
 }
 
-/// Tests that verify_membership returns InvalidKeyForProof when key maps to different leaf index
+/// Tests that verify_presence returns InvalidKeyForProof when key maps to different leaf index
 #[test]
 fn test_smt_proof_error_invalid_key_for_proof() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
@@ -777,12 +777,12 @@ fn test_smt_proof_error_invalid_key_for_proof() {
     let different_index_key = Word::from([ONE, ONE, ONE, Felt::new(999)]);
 
     assert_matches!(
-        proof.verify_membership(&different_index_key, &value, &root),
+        proof.verify_presence(&different_index_key, &value, &root),
         Err(SmtProofError::InvalidKeyForProof)
     );
 }
 
-/// Tests that verify_membership returns ValueMismatch when value doesn't match
+/// Tests that verify_presence returns ValueMismatch when value doesn't match
 #[test]
 fn test_smt_proof_error_value_mismatch() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
@@ -796,13 +796,13 @@ fn test_smt_proof_error_value_mismatch() {
     let wrong_value = Word::new([Felt::new(999); WORD_SIZE]);
 
     assert_matches!(
-        proof.verify_membership(&key, &wrong_value, &root),
+        proof.verify_presence(&key, &wrong_value, &root),
         Err(SmtProofError::ValueMismatch { expected, actual })
             if expected == wrong_value && actual == value
     );
 }
 
-/// Tests that verify_membership returns ConflictingRoots when root doesn't match
+/// Tests that verify_presence returns ConflictingRoots when root doesn't match
 #[test]
 fn test_smt_proof_error_conflicting_roots() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
@@ -816,15 +816,15 @@ fn test_smt_proof_error_conflicting_roots() {
     let wrong_root = Word::new([Felt::new(999); WORD_SIZE]);
 
     assert_matches!(
-        proof.verify_membership(&key, &value, &wrong_root),
+        proof.verify_presence(&key, &value, &wrong_root),
         Err(SmtProofError::ConflictingRoots { expected_root, actual_root: got_root })
             if expected_root == wrong_root && got_root == actual_root
     );
 }
 
-/// Tests that verify_non_membership returns Ok for keys with no value
+/// Tests that verify_unset returns Ok for keys with no value
 #[test]
-fn test_smt_proof_verify_non_membership_success() {
+fn test_smt_proof_verify_unset_success() {
     // Use an empty tree where no keys have values
     let smt = Smt::default();
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
@@ -832,12 +832,12 @@ fn test_smt_proof_verify_non_membership_success() {
     let root = smt.root();
 
     // This key has no value in the empty tree
-    proof.verify_non_membership(&key, &root).unwrap();
+    proof.verify_unset(&key, &root).unwrap();
 }
 
-/// Tests that verify_non_membership returns ValueMismatch when key has a value
+/// Tests that verify_unset returns ValueMismatch when key has a value
 #[test]
-fn test_smt_proof_verify_non_membership_fails_when_value_exists() {
+fn test_smt_proof_verify_unset_fails_when_value_exists() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
     let value = Word::new([ONE; WORD_SIZE]);
 
@@ -846,9 +846,71 @@ fn test_smt_proof_verify_non_membership_fails_when_value_exists() {
     let root = smt.root();
 
     // Key has a value, so non-membership should fail
+    assert_matches!(proof.verify_unset(&key, &root), Err(SmtProofError::ValueMismatch { .. }));
+}
+
+/// Tests that verify_absence returns Ok when the key has a different value
+#[test]
+fn test_smt_proof_verify_absence_success_different_value() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let actual_value = Word::new([ONE; WORD_SIZE]);
+
+    let smt = Smt::with_entries([(key, actual_value)]).unwrap();
+    let proof = smt.open(&key);
+    let root = smt.root();
+
+    // The key has a different value, so this pair is absent
+    let absent_value = Word::new([Felt::new(999); WORD_SIZE]);
+    proof.verify_absence(&key, &absent_value, &root).unwrap();
+}
+
+/// Tests that verify_absence returns Ok when the key is unset
+#[test]
+fn test_smt_proof_verify_absence_success_key_unset() {
+    // Use an empty tree
+    let smt = Smt::default();
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let proof = smt.open(&key);
+    let root = smt.root();
+
+    // Any non-empty value should be absent since key is unset
+    let value = Word::new([ONE; WORD_SIZE]);
+    proof.verify_absence(&key, &value, &root).unwrap();
+}
+
+/// Tests that verify_absence returns ValuePresent when the key-value pair exists
+#[test]
+fn test_smt_proof_error_value_present() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
+
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
+    let root = smt.root();
+
+    // The exact key-value pair exists, so absence verification fails
     assert_matches!(
-        proof.verify_non_membership(&key, &root),
-        Err(SmtProofError::ValueMismatch { .. })
+        proof.verify_absence(&key, &value, &root),
+        Err(SmtProofError::ValuePresent { key: k, value: v }) if k == key && v == value
+    );
+}
+
+/// Tests that verify_absence returns InvalidKeyForProof for wrong leaf index
+#[test]
+fn test_smt_proof_verify_absence_invalid_key() {
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
+
+    let smt = Smt::with_entries([(key, value)]).unwrap();
+    let proof = smt.open(&key);
+    let root = smt.root();
+
+    // Use a key that maps to a different leaf index
+    let different_index_key = Word::from([ONE, ONE, ONE, Felt::new(999)]);
+
+    assert_matches!(
+        proof.verify_absence(&different_index_key, &value, &root),
+        Err(SmtProofError::InvalidKeyForProof)
     );
 }
 

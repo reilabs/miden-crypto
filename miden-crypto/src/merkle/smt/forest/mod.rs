@@ -115,7 +115,8 @@ impl SmtForest {
             // These variants are only returned by verification methods, not by SmtProof::new()
             SmtProofError::InvalidKeyForProof
             | SmtProofError::ValueMismatch { .. }
-            | SmtProofError::ConflictingRoots { .. } => unreachable!(),
+            | SmtProofError::ConflictingRoots { .. }
+            | SmtProofError::ValuePresent { .. } => unreachable!(),
         })
     }
 
