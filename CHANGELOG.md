@@ -1,6 +1,7 @@
 ## 0.20.0 (TBD)
 
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
+- Expanded `PartialSmt` tracking to allow updates in empty subtrees ([#691](https://github.com/0xMiden/crypto/pull/691)).
 
 ## 0.19.0 (2025-11-30)
 
