@@ -93,15 +93,19 @@ fn err_with_leaves() {
 /// is an ancestor of another entry.
 #[test]
 fn err_with_leaves_entry_is_not_leaf() {
-    // NODE21 (depth 2, value 1) is the parent of NODE32 and NODE33 (depth 3, values 2-3)
-    let leaf_nodes_vec = vec![(NODE21, int_to_node(21)), (NODE32, int_to_node(32))];
+    // Provide all 8 leaves at depth 3
+    let mut entries: BTreeMap<NodeIndex, Word> = (0u64..8)
+        .map(|i| (NodeIndex::new(3, i).unwrap(), VALUES8[i as usize]))
+        .collect();
 
-    let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
+    // Add an entry at depth 1 - this is an ancestor of some depth-3 entries
+    entries.insert(NodeIndex::new(1, 0).unwrap(), int_to_node(999));
 
-    match PartialMerkleTree::with_leaves(leaf_nodes) {
-        Err(MerkleError::EntryIsNotLeaf { node, descendant }) => {
-            assert_eq!(node, NODE21, "Expected NODE21 as the non-leaf");
-            assert_eq!(descendant, NODE32, "Expected NODE32 as descendant");
+    // Verify we get EntryIsNotLeaf error
+    match PartialMerkleTree::with_leaves(entries) {
+        Err(MerkleError::EntryIsNotLeaf { node }) => {
+            assert_eq!(node.depth(), 1);
+            assert_eq!(node.value(), 0);
         },
         other => panic!("Expected EntryIsNotLeaf error, got {:?}", other),
     }

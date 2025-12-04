@@ -97,41 +97,6 @@ impl PartialMerkleTree {
         R: IntoIterator<IntoIter = I>,
         I: Iterator<Item = (NodeIndex, Word)> + ExactSizeIterator,
     {
-        let entries: Vec<_> = entries.into_iter().collect();
-
-        // Validate that no entry is an ancestor of another entry.
-        // This prevents ambiguity: if we provide both a parent and its child,
-        // should we use the provided parent hash or compute it from the child?
-        //
-        // Algorithm: Put all provided nodes in a set, then for each node walk up toward
-        // the root checking if any ancestor is also in the set.
-        let provided_nodes: BTreeSet<NodeIndex> = entries.iter().map(|(node, _)| *node).collect();
-
-        for (node, _) in &entries {
-            let mut current = *node;
-            while !current.is_root() {
-                current = current.parent();
-                if provided_nodes.contains(&current) {
-                    return Err(MerkleError::EntryIsNotLeaf { node: current, descendant: *node });
-                }
-            }
-        }
-
-        Self::with_leaves_internal(entries)
-    }
-
-    /// Internal method that skips ancestor validation.
-    /// Used by deserialization where the data was already validated when originally created.
-    ///
-    /// # Errors
-    /// Returns an error if:
-    /// - If the depth is 0 or is greater than 64.
-    /// - The provided entries contain an insufficient set of nodes.
-    fn with_leaves_internal<R, I>(entries: R) -> Result<Self, MerkleError>
-    where
-        R: IntoIterator<IntoIter = I>,
-        I: Iterator<Item = (NodeIndex, Word)> + ExactSizeIterator,
-    {
         let mut layers: BTreeMap<u8, Vec<u64>> = BTreeMap::new();
         let mut leaves = BTreeSet::new();
         let mut nodes = BTreeMap::new();
@@ -176,27 +141,33 @@ impl PartialMerkleTree {
                 // get the parent node index
                 let parent_node = NodeIndex::new(depth - 1, index_value / 2)?;
 
-                // Check if the parent hash was already calculated. In about half of the cases, we
-                // don't need to do anything.
-                if !parent_layer.contains(&parent_node.value()) {
-                    // create current node index
-                    let index = NodeIndex::new(depth, index_value)?;
-
-                    // get hash of the current node
-                    let node =
-                        nodes.get(&index).ok_or(MerkleError::NodeIndexNotFoundInTree(index))?;
-                    // get hash of the sibling node
-                    let sibling = nodes
-                        .get(&index.sibling())
-                        .ok_or(MerkleError::NodeIndexNotFoundInTree(index.sibling()))?;
-                    // get parent hash
-                    let parent = Rpo256::merge(&index.build_node(*node, *sibling));
-
-                    // add index value of the calculated node to the parents layer
-                    parent_layer.push(parent_node.value());
-                    // add index and hash to the nodes map
-                    nodes.insert(parent_node, parent);
+                // If parent already exists, check if it's user-provided (invalid) or computed
+                // (skip)
+                if parent_layer.contains(&parent_node.value()) {
+                    // If the parent was provided as a leaf, that's invalid - we can't have both
+                    // a node and its descendant in the input set.
+                    if leaves.contains(&parent_node) {
+                        return Err(MerkleError::EntryIsNotLeaf { node: parent_node });
+                    }
+                    continue;
                 }
+
+                // create current node index
+                let index = NodeIndex::new(depth, index_value)?;
+
+                // get hash of the current node
+                let node = nodes.get(&index).ok_or(MerkleError::NodeIndexNotFoundInTree(index))?;
+                // get hash of the sibling node
+                let sibling = nodes
+                    .get(&index.sibling())
+                    .ok_or(MerkleError::NodeIndexNotFoundInTree(index.sibling()))?;
+                // get parent hash
+                let parent = Rpo256::merge(&index.build_node(*node, *sibling));
+
+                // add index value of the calculated node to the parents layer
+                parent_layer.push(parent_node.value());
+                // add index and hash to the nodes map
+                nodes.insert(parent_node, parent);
             }
         }
 
@@ -505,7 +476,7 @@ impl Deserializable for PartialMerkleTree {
             leaf_nodes.push((index, hash));
         }
 
-        let pmt = PartialMerkleTree::with_leaves_internal(leaf_nodes).map_err(|_| {
+        let pmt = PartialMerkleTree::with_leaves(leaf_nodes).map_err(|_| {
             DeserializationError::InvalidValue("Invalid data for PartialMerkleTree creation".into())
         })?;
 
