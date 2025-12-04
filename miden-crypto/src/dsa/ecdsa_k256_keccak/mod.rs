@@ -32,7 +32,7 @@ const SECRET_KEY_BYTES: usize = 32;
 /// Length of public key in bytes when using compressed format encoding
 pub(crate) const PUBLIC_KEY_BYTES: usize = 33;
 /// Length of signature in bytes using our custom serialization
-const SIGNATURE_BYTES: usize = 66;
+const SIGNATURE_BYTES: usize = 65;
 /// Length of signature in bytes using standard serialization i.e., `SEC1`
 const SIGNATURE_STANDARD_BYTES: usize = 64;
 /// Length of scalars for the `secp256k1` curve
