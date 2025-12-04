@@ -27,9 +27,10 @@ pub use large::{
 pub use large::{RocksDbConfig, RocksDbStorage};
 
 mod large_forest;
+
 pub use large_forest::{
-    History, HistoryError, HistoryView, LargeSmtForestError, NumLevels, Storage as ForestStorage,
-    StorageError, StoredTreeHandle,
+    History, HistoryError, HistoryView, LargeSmtForest, LargeSmtForestError,
+    Storage as ForestStorage, StorageError, StoredTreeHandle, SubtreeLevels,
 };
 
 mod simple;
