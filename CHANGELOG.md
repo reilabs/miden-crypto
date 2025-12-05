@@ -2,7 +2,10 @@
 
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
 - Added validation to `PartialMerkleTree::with_leaves()` to reject internal nodes ([#684](https://github.com/0xMiden/crypto/pull/684)).
-- Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
+- 
+## 0.19.2 (2025-12-04)
+
+- [BREAKING] Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
 
 ## 0.19.1 (2025-12-04)
 
