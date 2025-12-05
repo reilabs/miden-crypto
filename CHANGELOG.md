@@ -2,6 +2,14 @@
 
 - [BREAKING] Rename `MmrProof` to `MmrPath`, and introduce a new `MmrProof` with the leaf value included ([#656](https://github.com/0xMiden/crypto/pull/656)).
 - Added `+ Sync` bound to `StorageError` and `LargeSmtError` ([#680](https://github.com/0xMiden/crypto/pull/680)).
+- 
+## 0.19.2 (2025-12-04)
+
+- [BREAKING] Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
+
+## 0.19.1 (2025-12-04)
+
+- Fixed `Signature` deserialization missing one byte from serialization ([#687](https://github.com/0xMiden/crypto/pull/687)).
 
 ## 0.19.0 (2025-11-30)
 
