@@ -32,7 +32,7 @@ pub enum LargeSmtForestError {
 }
 
 /// The result type for use within the large SMT forest portion of the library.
-#[allow(dead_code)] // Temporarily
+#[allow(dead_code)] // Temporary
 pub type Result<T> = std::result::Result<T, LargeSmtForestError>;
 
 pub mod prefix {
@@ -57,6 +57,5 @@ pub mod prefix {
     }
 
     /// The result type for use within the prefix portion of the library.
-    #[allow(dead_code)] // Temporary
     pub type Result<T> = std::result::Result<T, PrefixError>;
 }
