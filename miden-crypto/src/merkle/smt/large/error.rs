@@ -28,7 +28,7 @@ pub enum LargeSmtError {
 
     /// Storage already contains data when trying to create a new tree.
     ///
-    /// Use [`LargeSmt::open_with_root()`] or [`LargeSmt::open_unchecked()`] to open
+    /// Use [`super::LargeSmt::open_with_root()`] or [`super::LargeSmt::open_unchecked()`] to open
     /// existing storage.
     #[error("storage is not empty")]
     StorageNotEmpty,
