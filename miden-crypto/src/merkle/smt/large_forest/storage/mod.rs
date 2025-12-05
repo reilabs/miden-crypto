@@ -16,6 +16,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt::Debug;
 
 pub mod error;
+pub mod memory;
 
 pub use error::{Result, StorageError};
 

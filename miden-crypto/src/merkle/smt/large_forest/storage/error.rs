@@ -17,6 +17,10 @@ pub enum StorageError {
     #[error(transparent)]
     Backend(#[from] Box<dyn core::error::Error + Send + 'static>),
 
+    /// Raised by the storage layer if any invalid configuration is encountered.
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+
     /// An error with the contents of a compact tree leaf.
     #[error(transparent)]
     Leaf(#[from] SmtLeafError),
