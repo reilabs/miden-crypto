@@ -8,13 +8,31 @@
 //!
 //! Examples below require the `rocksdb` feature.
 //!
-//! Open an existing RocksDB-backed tree:
+//! Open an existing RocksDB-backed tree with root validation:
+//! ```no_run
+//! use miden_crypto::{
+//!     Word,
+//!     merkle::smt::{LargeSmt, RocksDbConfig, RocksDbStorage},
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // The expected root should be stored/tracked separately by the caller
+//! let expected_root: Word = /* load from your own persistence */ todo!();
+//!
+//! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
+//! let smt = LargeSmt::open_with_root(storage, expected_root)?;
+//! assert_eq!(smt.root(), expected_root);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Open an existing tree without root validation (use with caution):
 //! ```no_run
 //! use miden_crypto::merkle::smt::{LargeSmt, RocksDbConfig, RocksDbStorage};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
-//! let smt = LargeSmt::new(storage)?; // reconstructs in-memory top if data exists
+//! let smt = LargeSmt::open_unchecked(storage)?;
 //! let _root = smt.root();
 //! # Ok(())
 //! # }
@@ -64,7 +82,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
-//! let mut smt = LargeSmt::new(storage)?;
+//! let mut smt = LargeSmt::open_unchecked(storage)?;
 //!
 //! let k1 = Word::new([Felt::new(101), Felt::new(0), Felt::new(0), Felt::new(0)]);
 //! let v1 = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
@@ -315,9 +333,9 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Returns a boolean value indicating whether the SMT is empty.
     ///
     /// # Errors
-    /// Returns an error if there is a storage error when retrieving the root or leaf count.
+    /// Returns an error if there is a storage error when retrieving the leaf count.
     pub fn is_empty(&self) -> Result<bool, LargeSmtError> {
-        let root = self.storage.get_root()?.unwrap_or(Self::EMPTY_ROOT);
+        let root = self.root();
         debug_assert_eq!(self.num_leaves()? == 0, root == Self::EMPTY_ROOT);
         Ok(root == Self::EMPTY_ROOT)
     }

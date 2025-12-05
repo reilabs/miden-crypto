@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use super::{MerkleError, StorageError};
+use crate::Word;
 
 // ERROR TYPES
 // ================================================================================================
@@ -15,6 +16,22 @@ pub enum LargeSmtError {
     /// A storage operation failed.
     #[error("storage operation failed")]
     Storage(#[from] StorageError),
+
+    /// The reconstructed root does not match the expected root.
+    #[error("root mismatch: expected {expected:?}, got {actual:?}")]
+    RootMismatch {
+        /// The expected root hash.
+        expected: Word,
+        /// The actual reconstructed root hash.
+        actual: Word,
+    },
+
+    /// Storage already contains data when trying to create a new tree.
+    ///
+    /// Use [`LargeSmt::open_with_root()`] or [`LargeSmt::open_unchecked()`] to open
+    /// existing storage.
+    #[error("storage is not empty")]
+    StorageNotEmpty,
 }
 
 #[cfg(test)]
