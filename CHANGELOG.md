@@ -1,6 +1,6 @@
 ## 0.19.2 (2025-12-04)
 
-- Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
+- [BREAKING] Fixed `Signature` serialization by reducing `SIGNATURE_BYTES` to 65 ([#686](https://github.com/0xMiden/crypto/pull/686)).
 
 ## 0.19.1 (2025-12-04)
 
