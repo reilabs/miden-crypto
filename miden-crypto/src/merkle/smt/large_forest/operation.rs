@@ -125,7 +125,7 @@ impl ForestBatch {
 
     /// Adds the provided `operations` to be performed on the tree with the provided `root`.
     pub fn add_operations(&mut self, root: Word, operations: Vec<ForestOp>) {
-        let batch = self.operations.entry(root).or_insert_with(TreeBatch::empty);
+        let batch = self.operations.entry(root).or_insert(TreeBatch::empty());
         batch.add_operations(operations);
     }
 
@@ -135,7 +135,7 @@ impl ForestBatch {
     /// It is assumed that calling this means that the caller wants to insert operations into the
     /// associated batch, so a batch will be created even if one was not previously present.
     pub fn operations(&mut self, root: Word) -> &mut TreeBatch {
-        self.operations.entry(root).or_insert_with(TreeBatch::empty)
+        self.operations.entry(root).or_insert(TreeBatch::empty())
     }
 
     /// Consumes the batch as a map of batches, with each individual batch guaranteed to be in

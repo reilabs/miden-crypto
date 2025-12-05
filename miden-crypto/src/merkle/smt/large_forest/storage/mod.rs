@@ -16,6 +16,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt::Debug;
 
 pub mod error;
+pub mod memory;
 
 pub use error::{Result, StorageError};
 
@@ -23,7 +24,10 @@ use crate::{
     Word,
     merkle::{
         NodeIndex,
-        smt::{InnerNode, SmtLeaf, Subtree, large_forest::utils::SubtreeLevels},
+        smt::{
+            InnerNode, SmtLeaf,
+            large_forest::{subtree::ForestSubtree, utils::SubtreeLevels},
+        },
     },
 };
 
@@ -202,7 +206,7 @@ where
 /// implementation of the trait.
 pub trait StoredTreeHandle
 where
-    Self: Debug + Send + Sync + 'static,
+    Self: Debug + Send + Sync,
 {
     /// Gets the stored root of the tree whose data this handle points to.
     ///
@@ -376,7 +380,7 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn get_subtree(&self, index: NodeIndex) -> Result<Option<Subtree>>;
+    fn get_subtree(&self, index: NodeIndex) -> Result<Option<ForestSubtree>>;
 
     /// Sets the value of the subtree with the provided `index` for its root to `subtree`, returning
     /// any previous tree at that index or [`None`] if there was none.
@@ -390,7 +394,11 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn set_subtree(&self, index: NodeIndex, subtree: Subtree) -> Result<Option<Subtree>>;
+    fn set_subtree(
+        &self,
+        index: NodeIndex,
+        subtree: ForestSubtree,
+    ) -> Result<Option<ForestSubtree>>;
 
     /// Removes the subtree with the provided `index` for its root, returning it if it existed or
     /// [`None`] otherwise.
@@ -407,7 +415,7 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn remove_subtree(&self, index: &NodeIndex) -> Result<Option<Subtree>>;
+    fn remove_subtree(&self, index: &NodeIndex) -> Result<Option<ForestSubtree>>;
 
     /// Gets the subtrees at the provided `indices` for their roots, or returns [`None`] should any
     /// of those indices not contain a tree.
@@ -418,7 +426,7 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn get_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<Subtree>>>;
+    fn get_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<ForestSubtree>>>;
 
     /// Sets the value for each subtree with root at the index to the corresponding tree value,
     /// returning the previous value if it existed or [`None`] if it did not.
@@ -432,7 +440,10 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn set_subtrees(&self, subtrees: Vec<(NodeIndex, Subtree)>) -> Result<Vec<Option<Subtree>>>;
+    fn set_subtrees(
+        &self,
+        subtrees: Vec<(NodeIndex, ForestSubtree)>,
+    ) -> Result<Vec<Option<ForestSubtree>>>;
 
     /// Removes the subtrees with the provided root `indices`, returning those that existed and
     /// returning [`None`] for those that did not.
@@ -449,7 +460,7 @@ where
     /// - [`StorageError::Subtree`] if a malformed subtree is found during the query.
     /// - [`StorageError::NotInStorage`] if the storage is queried for a subtree that is in the
     ///   guaranteed-to-be-in-memory portion of the tree.
-    fn remove_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<Subtree>>>;
+    fn remove_subtrees(&self, indices: &[NodeIndex]) -> Result<Vec<Option<ForestSubtree>>>;
 
     /// Gets the node of the tree at the specified `index`, or returns [`None`] if the node is
     /// sparse.
@@ -518,7 +529,7 @@ where
     /// # Errors
     ///
     /// - [`StorageError::Backend`] if a backend error occurs while querying.
-    fn iter_subtrees(&self) -> Result<Box<dyn Iterator<Item = (NodeIndex, Subtree)> + '_>>;
+    fn iter_subtrees(&self) -> Result<Box<dyn Iterator<Item = (NodeIndex, ForestSubtree)> + '_>>;
 
     /// Returns the restoration data for the guaranteed-in-memory portion of the tree, consisting of
     /// a pair of `(num_levels, node_values)`.

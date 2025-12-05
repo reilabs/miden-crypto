@@ -39,13 +39,20 @@ mod error;
 mod history;
 mod operation;
 mod prefix;
+mod property_tests;
 mod storage;
+mod subtree;
+mod tests;
 mod utils;
 
 pub use error::{LargeSmtForestError, Result};
 pub use history::{History, HistoryView, error::HistoryError};
 pub use operation::{ForestBatch, ForestOp, TreeBatch};
-pub use storage::{Storage, StorageError, StoredTreeHandle};
+pub use storage::{
+    Storage, StorageError, StoredTreeHandle,
+    memory::{InMemoryStorage, InMemoryTreeHandle},
+};
+pub use subtree::ForestSubtree;
 pub use utils::SubtreeLevels;
 
 use crate::{
@@ -94,6 +101,8 @@ pub struct LargeSmtForest<S: Storage> {
 
     /// The container for the in-memory prefixes of each tree stored in the forest, identified by
     /// their current root.
+    ///
+    /// This must be kept up to date with the prefixes of all trees in the forest actively.
     prefixes: Map<Word, InMemoryPrefix>,
 
     /// The container for the historical versions of each tree stored in the forest, identified by
