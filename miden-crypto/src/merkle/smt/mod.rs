@@ -30,8 +30,8 @@ mod large_forest;
 
 #[cfg(feature = "concurrent")]
 pub use large_forest::{
-    LargeSmtForest, LargeSmtForestError, Storage as ForestStorage, StorageError, StoredTreeHandle,
-    SubtreeLevels,
+    ForestBatch, ForestOp, LargeSmtForest, LargeSmtForestError, Storage as ForestStorage,
+    StorageError, StoredTreeHandle, SubtreeLevels, TreeBatch,
 };
 
 mod simple;
